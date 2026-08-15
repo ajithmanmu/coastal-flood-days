@@ -3,7 +3,11 @@
 Count how many days a year each NOAA coastal water-level station floods, and show the
 multi-decade trend per station.
 
-**Status:** milestone one — pull one station, one year, produce one number.
+**Status:** early. Milestone one — pull one station, one year, produce one number.
+
+> ⚠️ **The numbers this currently produces are not valid.** The flood threshold is a
+> placeholder (station MHHW plus a flat 0.55 m), not NOAA's published per-station
+> threshold. Real thresholds come next. Don't cite anything from this yet.
 
 ## Setup
 
