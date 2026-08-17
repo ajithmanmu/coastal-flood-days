@@ -51,12 +51,22 @@ class FloodYear:
 
     year: int
     flood_days: int
+    flood_hours: float
     days_observed: int
     completeness: float
 
     @property
     def usable(self) -> bool:
         return self.completeness >= 0.90
+
+    @property
+    def hours_per_flood_day(self) -> float | None:
+        """When it floods here, how long does it stay? The headline metric.
+
+        Deliberately NOT called anything about road closures -- this is exposure
+        duration at a gauge, not impact duration on land (rule 10).
+        """
+        return self.flood_hours / self.flood_days if self.flood_days else None
 
 
 def fetch_threshold(station_id: str, level: str = "nos_minor") -> float:
@@ -87,11 +97,18 @@ def fetch_hourly_heights(station_id: str, year: int) -> pd.DataFrame:
     return df
 
 
-def count_flood_days(heights: pd.DataFrame, threshold: float, year: int) -> FloodYear:
-    """Count calendar days whose maximum water level exceeds the threshold.
+def summarise_year(heights: pd.DataFrame, threshold: float, year: int) -> FloodYear:
+    """Reduce a year of hourly water levels to flood days AND flood hours.
 
     Rule 1: one day, one count. Reducing to a daily maximum first means a day with two
     exceeding high tides still counts once.
+
+    Rule 9: flood hours is the count of hourly observations at or above the threshold,
+    each standing for one hour. Measured against the 6-minute product this is accurate
+    to 3-5% for an annual total -- but only for the annual total. It says nothing about
+    how long any individual flood lasted; a 40-minute event is invisible at this
+    resolution. Per-event durations need the 6-minute product, which only exists from
+    1995-96 onward.
 
     Rule 11: at or above (>=), established by measurement rather than documentation.
 
@@ -117,9 +134,14 @@ def count_flood_days(heights: pd.DataFrame, threshold: float, year: int) -> Floo
     return FloodYear(
         year=year,
         flood_days=int((daily_max >= threshold).sum()),
+        flood_hours=float((observed >= threshold).sum()),
         days_observed=len(daily_max),
         completeness=len(observed) / expected_hours,
     )
+
+
+# Kept so the name that matches NOAA's own vocabulary still works.
+count_flood_days = summarise_year
 
 
 if __name__ == "__main__":

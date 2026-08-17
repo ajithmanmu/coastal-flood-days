@@ -7,7 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from flood_days import count_flood_days  # noqa: E402
+from flood_days import summarise_year as count_flood_days  # noqa: E402
 
 
 def series(pairs):
