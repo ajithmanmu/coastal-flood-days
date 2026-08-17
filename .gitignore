@@ -4,3 +4,7 @@ __pycache__/
 data/
 .DS_Store
 .env
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/.terraform.lock.hcl
