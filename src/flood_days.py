@@ -93,8 +93,19 @@ def count_flood_days(heights: pd.DataFrame, threshold: float, year: int) -> Floo
     Rule 1: one day, one count. Reducing to a daily maximum first means a day with two
     exceeding high tides still counts once.
 
-    Rule 11: strictly greater than. NOAA's published definition is "exceeds", and a day
-    that merely touches the threshold is not a flood day under it.
+    Rule 11: at or above (>=), established by measurement rather than documentation.
+
+    NOAA's published wording is "exceeds", which reads as strictly greater. Their data
+    disagrees. Across nine stations in 2024, total disagreement with NOAA's own counts:
+
+        GMT + >=   1 day     <- this
+        GMT + >    3 days
+        LST + >    9 days
+        LST + >=   9 days
+
+    So the implementation behind NOAA's published counts treats a value equal to the
+    threshold as a flood. Where the docs and the data disagree, follow the data and say
+    so in the methods section.
 
     Rule 5: days with no observations are absent from the daily max, so they are never
     counted as dry. Completeness is reported alongside rather than folded into the count.
@@ -105,7 +116,7 @@ def count_flood_days(heights: pd.DataFrame, threshold: float, year: int) -> Floo
 
     return FloodYear(
         year=year,
-        flood_days=int((daily_max > threshold).sum()),
+        flood_days=int((daily_max >= threshold).sum()),
         days_observed=len(daily_max),
         completeness=len(observed) / expected_hours,
     )

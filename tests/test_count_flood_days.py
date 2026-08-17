@@ -30,13 +30,17 @@ def test_day_below_threshold_is_not_counted():
     assert count_flood_days(heights, threshold=1.5, year=2024).flood_days == 0
 
 
-def test_exactly_at_threshold_does_not_count():
-    """Rule 11: NOAA's definition is "exceeds", so touching the line is not a flood."""
-    heights = series([("2024-01-01 02:00", 1.5)])
-    assert count_flood_days(heights, threshold=1.5, year=2024).flood_days == 0
+def test_exactly_at_threshold_counts():
+    """Rule 11: >=, matching NOAA's data rather than NOAA's wording.
 
-    just_over = series([("2024-01-01 02:00", 1.5001)])
-    assert count_flood_days(just_over, threshold=1.5, year=2024).flood_days == 1
+    Their docs say "exceeds"; their published counts behave as >=. Measured across
+    nine stations: >= disagrees with NOAA by 1 day, > disagrees by 3.
+    """
+    heights = series([("2024-01-01 02:00", 1.5)])
+    assert count_flood_days(heights, threshold=1.5, year=2024).flood_days == 1
+
+    just_under = series([("2024-01-01 02:00", 1.4999)])
+    assert count_flood_days(just_under, threshold=1.5, year=2024).flood_days == 0
 
 
 def test_missing_days_are_not_counted_as_dry():
