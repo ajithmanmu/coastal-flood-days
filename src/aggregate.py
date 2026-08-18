@@ -138,8 +138,16 @@ def summarise_stations(results: pd.DataFrame) -> pd.DataFrame:
 
 
 def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
+    """Three artifacts, sized for three different jobs.
+
+    The Parquet file is the dataset. The map summary is ~137 rows so the page draws on
+    first paint. Per-station files are fetched only when someone clicks -- putting every
+    station's full century into the summary would make the map wait on data most
+    visitors never look at.
+    """
     RESULTS.mkdir(parents=True, exist_ok=True)
     results.to_parquet(RESULTS / "flood_days.parquet", index=False)
+
     (RESULTS / "map_summary.json").write_text(
         json.dumps(
             {
@@ -150,6 +158,21 @@ def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
             indent=1,
         )
     )
+
+    detail_dir = RESULTS / "stations"
+    detail_dir.mkdir(exist_ok=True)
+    for station_id, block in results.groupby("station"):
+        series = block[["year", "flood_days", "flood_hours", "completeness", "usable"]]
+        (detail_dir / f"{station_id}.json").write_text(
+            json.dumps(
+                {
+                    "station": station_id,
+                    "name": block["name"].iloc[0],
+                    "years": json.loads(series.to_json(orient="records")),
+                },
+                separators=(",", ":"),
+            )
+        )
 
 
 if __name__ == "__main__":

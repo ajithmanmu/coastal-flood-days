@@ -1,0 +1,394 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coastal Flood Days</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --plane: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --hair: rgba(11, 11, 11, 0.10);
+    /* Sequential blue, low -> high. Light surface: light -> dark. */
+    --s1: #9ec5f4;
+    --s2: #6da7ec;
+    --s3: #3987e5;
+    --s4: #256abf;
+    --s5: #104281;
+    --land: #efeeea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --plane: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --hair: rgba(255, 255, 255, 0.10);
+      /* Dark surface: the ramp runs dark -> light so magnitude still reads as weight. */
+      --s1: #1c5cab;
+      --s2: #2a78d6;
+      --s3: #3987e5;
+      --s4: #86b6ef;
+      --s5: #cde2fb;
+      --land: #232322;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --plane: #0d0d0d;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --hair: rgba(255, 255, 255, 0.10);
+    --s1: #1c5cab;
+    --s2: #2a78d6;
+    --s3: #3987e5;
+    --s4: #86b6ef;
+    --s5: #cde2fb;
+    --land: #232322;
+  }
+
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 20px 64px; }
+
+  h1 { font-size: 1.6rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-2); margin: 0 0 28px; max-width: 62ch; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .card { background: var(--surface); border: 1px solid var(--hair); border-radius: 10px; padding: 14px 16px; }
+  .card .v { font-size: 1.7rem; line-height: 1.1; }
+  .card .k { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+
+  .panel { background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; padding: 18px 20px 14px; margin-bottom: 20px; }
+  .panel h2 { font-size: 0.95rem; margin: 0 0 2px; }
+  .panel .note { color: var(--muted); font-size: 0.82rem; margin: 0 0 14px; }
+
+  .split { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .dot { cursor: pointer; stroke: var(--surface); stroke-width: 1.25; }
+  .dot:hover, .dot.sel { stroke: var(--ink); stroke-width: 2; }
+  .grid line { stroke: var(--grid); stroke-width: 1; }
+  .axis line, .axis path { stroke: var(--axis); stroke-width: 1; }
+  text { fill: var(--muted); font-size: 11px; }
+  .axis-title { fill: var(--ink-2); font-size: 11.5px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 22px; align-items: center; margin-top: 12px; color: var(--ink-2); font-size: 0.82rem; }
+  .swatches { display: flex; align-items: center; gap: 4px; }
+  .sw { width: 26px; height: 11px; border-radius: 2px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+  th { color: var(--muted); font-weight: 500; }
+  .scroll { overflow-x: auto; max-height: 340px; overflow-y: auto; }
+
+  #tip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--hair);
+    border-radius: 8px; padding: 8px 10px; font-size: 0.8rem; box-shadow: 0 4px 16px rgba(0,0,0,.14);
+    z-index: 9; max-width: 250px;
+  }
+  #tip b { display: block; margin-bottom: 3px; }
+  #tip .r { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .caveat { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--grid); padding-top: 14px; margin-top: 26px; }
+  .empty { color: var(--muted); padding: 28px 0; text-align: center; }
+</style>
+
+<div class="wrap">
+  <h1>Coastal Flood Days</h1>
+  <p class="sub">
+    NOAA publishes how many <em>days</em> each coastal station floods. It doesn't publish
+    how long those floods last. A forty-minute exceedance at high tide and a six-hour
+    inundation both count as one day. This measures the hours.
+  </p>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>Where floods are frequent, and where they linger</h2>
+    <p class="note">Circle area = flood days per year. Colour = hours above the threshold per flood day. Last 10 years, usable years only.</p>
+    <div class="split">
+      <div><svg id="map" viewBox="0 0 640 400" role="img" aria-label="US coastal stations"></svg></div>
+      <div>
+        <svg id="scatter" viewBox="0 0 380 330" role="img" aria-label="Frequency versus duration"></svg>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="swatches">
+        <span style="margin-right:4px">hrs / flood day</span>
+        <span class="sw" style="background:var(--s1)"></span><span class="sw" style="background:var(--s2)"></span>
+        <span class="sw" style="background:var(--s3)"></span><span class="sw" style="background:var(--s4)"></span>
+        <span class="sw" style="background:var(--s5)"></span>
+        <span style="margin-left:4px">under 1.5 → over 5</span>
+      </span>
+      <span id="sizekey" class="swatches"></span>
+    </div>
+  </div>
+
+  <div class="panel" id="detailPanel" hidden>
+    <h2 id="detailName"></h2>
+    <p class="note" id="detailNote"></p>
+    <svg id="history" viewBox="0 0 900 240" role="img" aria-label="Station history"></svg>
+  </div>
+
+  <div class="panel">
+    <h2>Every station</h2>
+    <p class="note">The same figures as the map. Sorted by hours per flood day.</p>
+    <div class="scroll"><table id="table"></table></div>
+  </div>
+
+  <p class="caveat">
+    <strong>What these numbers are.</strong> Hours the water sat at or above NOAA's NOS minor
+    flood threshold at the gauge — <em>exposure duration</em>, not road-closure time. A tide
+    gauge measures one point in the water, not the street, and gauges systematically
+    undercount street flooding. Flood-day counts are computed independently from raw hourly
+    observations and match NOAA's published counts at 99% of station-years. Years with under
+    90% valid observations are excluded rather than counted as calm.
+  </p>
+</div>
+<div id="tip"></div>
+
+<script type="module">
+const $ = s => document.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? "–" : (+v).toFixed(d);
+
+// Colour classes for hours-per-flood-day. Five bins: past ~7, adjacent classes blur.
+const BINS = [1.5, 2.5, 3.5, 5];
+const band = v => v == null ? "var(--muted)" : `var(--s${BINS.findIndex(b => v < b) + 1 || 5})`;
+
+async function load() {
+  if (window.__DATA__) return window.__DATA__;
+  const r = await fetch("./map_summary.json");
+  if (!r.ok) throw new Error("no data");
+  return r.json();
+}
+
+let stations = [];
+
+function render() {
+  const conus = stations.filter(s => s.lon < -60 && s.lon > -130 && s.lat < 50);
+  const trendable = stations.filter(s => s.trend_supported).length;
+  const worst = [...stations].sort((a, b) => b.hours_per_flood_day - a.hours_per_flood_day)[0];
+
+  $("#cards").innerHTML = [
+    [stations.length, "stations"],
+    [trendable, "with 37+ usable years"],
+    [fmt(stations.reduce((a, s) => a + s.hours_per_year, 0) / stations.length), "mean hours underwater / yr"],
+    [worst ? worst.name.split(",")[0] : "–", worst ? `longest floods · ${fmt(worst.hours_per_flood_day)} hrs each` : ""],
+  ].map(([v, k]) => `<div class="card"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
+
+  // Each chart is isolated: a single bad station should degrade one panel, not blank
+  // the page. Found the hard way -- a one-station map produced a zero-width extent.
+  for (const [fn, arg] of [[drawMap, conus], [drawScatter, stations], [drawTable, stations], [drawSizeKey, null]]) {
+    try { fn(arg); } catch (err) { console.error(fn.name, err); }
+  }
+}
+
+// Area-proportional radius: perceived size must track the value, not the radius.
+const maxDays = () => Math.max(...stations.map(s => s.days_per_year), 1);
+const radius = v => 2.2 + 11 * Math.sqrt(Math.max(v, 0) / maxDays());
+
+function drawMap(rows) {
+  const svg = $("#map"); svg.replaceChildren();
+  const W = 640, H = 400, pad = 18;
+  if (!rows.length) return;
+  const lons = rows.map(r => r.lon), lats = rows.map(r => r.lat);
+  // A degenerate extent (one station, or several at one spot) divides by zero and
+  // poisons every coordinate with NaN. Give it a minimum span instead.
+  const span = (lo, hi, min) => (hi - lo < min ? [(lo + hi) / 2 - min / 2, (lo + hi) / 2 + min / 2] : [lo, hi]);
+  const [lon0, lon1] = span(Math.min(...lons), Math.max(...lons), 4);
+  const [lat0, lat1] = span(Math.min(...lats), Math.max(...lats), 3);
+  // cos(mid-latitude) keeps longitude degrees from stretching the coast sideways.
+  const k = Math.cos((lat0 + lat1) / 2 * Math.PI / 180);
+  const sx = (W - pad * 2) / ((lon1 - lon0) * k), sy = (H - pad * 2) / (lat1 - lat0);
+  const s = Math.min(sx, sy);
+  const ox = pad + ((W - pad * 2) - (lon1 - lon0) * k * s) / 2;
+  const oy = pad + ((H - pad * 2) - (lat1 - lat0) * s) / 2;
+  const X = lon => ox + (lon - lon0) * k * s;
+  const Y = lat => oy + (lat1 - lat) * s;
+
+  // Draw larger circles first so small ones stay clickable on top.
+  [...rows].sort((a, b) => b.days_per_year - a.days_per_year).forEach(r => {
+    const c = el("circle", {
+      class: "dot", cx: X(r.lon), cy: Y(r.lat), r: radius(r.days_per_year),
+      fill: band(r.hours_per_flood_day), "data-station": r.station,
+    });
+    wire(c, r); svg.appendChild(c);
+  });
+}
+
+function drawScatter(rows) {
+  const svg = $("#scatter"); svg.replaceChildren();
+  const W = 380, H = 330, L = 44, B = 42, T = 10, R = 10;
+  const xMax = Math.max(...rows.map(r => r.days_per_year), 1) * 1.08;
+  const yMax = Math.max(...rows.map(r => r.hours_per_year), 1) * 1.08;
+  const X = v => L + v / xMax * (W - L - R);
+  const Y = v => H - B - v / yMax * (H - B - T);
+
+  const g = el("g", { class: "grid" });
+  for (let i = 0; i <= 4; i++) {
+    const y = Y(yMax * i / 4);
+    g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y }));
+    const t = el("text", { x: L - 7, y: y + 3.5, "text-anchor": "end" });
+    t.textContent = Math.round(yMax * i / 4); g.appendChild(t);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const x = X(xMax * i / 4);
+    const t = el("text", { x, y: H - B + 15, "text-anchor": "middle" });
+    t.textContent = Math.round(xMax * i / 4); g.appendChild(t);
+  }
+  svg.appendChild(g);
+
+  const ax = el("g", { class: "axis" });
+  ax.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B }));
+  svg.appendChild(ax);
+
+  const xt = el("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", class: "axis-title" });
+  xt.textContent = "flood days per year"; svg.appendChild(xt);
+  const yt = el("text", { x: -(T + H - B) / 2, y: 13, transform: "rotate(-90)", "text-anchor": "middle", class: "axis-title" });
+  yt.textContent = "hours underwater per year"; svg.appendChild(yt);
+
+  rows.forEach(r => {
+    const c = el("circle", {
+      class: "dot", cx: X(r.days_per_year), cy: Y(r.hours_per_year), r: 5,
+      fill: band(r.hours_per_flood_day), "data-station": r.station,
+    });
+    wire(c, r); svg.appendChild(c);
+  });
+}
+
+function drawSizeKey() {
+  const key = $("#sizekey"); key.replaceChildren();
+  const label = document.createElement("span"); label.textContent = "days / yr";
+  key.appendChild(label);
+  const m = maxDays();
+  [Math.round(m / 4), Math.round(m / 2), Math.round(m)].forEach(v => {
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("width", 30); svg.setAttribute("height", 28); svg.style.overflow = "visible";
+    const c = el("circle", { cx: 15, cy: 16, r: radius(v), fill: "none", stroke: "var(--axis)", "stroke-width": 1.2 });
+    svg.appendChild(c); key.appendChild(svg);
+    const t = document.createElement("span"); t.textContent = v; t.style.marginLeft = "-6px"; key.appendChild(t);
+  });
+}
+
+function drawTable(rows) {
+  const sorted = [...rows].sort((a, b) => (b.hours_per_flood_day || 0) - (a.hours_per_flood_day || 0));
+  $("#table").innerHTML =
+    `<thead><tr><th>station</th><th>days/yr</th><th>hours/yr</th><th>hrs per flood day</th><th>usable yrs</th></tr></thead><tbody>` +
+    sorted.map(r => `<tr><td>${r.name}</td><td>${fmt(r.days_per_year)}</td><td>${fmt(r.hours_per_year)}</td>` +
+      `<td>${fmt(r.hours_per_flood_day, 2)}</td><td>${r.usable_years}${r.trend_supported ? "" : " *"}</td></tr>`).join("") +
+    `</tbody>`;
+}
+
+function wire(node, r) {
+  node.addEventListener("mousemove", e => {
+    const tip = $("#tip");
+    tip.innerHTML = `<b>${r.name}</b>
+      <span class="r">${fmt(r.days_per_year)} flood days/yr</span><br>
+      <span class="r">${fmt(r.hours_per_year)} hours/yr</span><br>
+      <span class="r">${fmt(r.hours_per_flood_day, 2)} hrs per flood day</span><br>
+      <span class="r">${r.usable_years} usable years${r.trend_supported ? "" : " — too few for a trend"}</span>`;
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - 260) + "px";
+    tip.style.top = (e.clientY + 16) + "px";
+  });
+  node.addEventListener("mouseleave", () => { $("#tip").style.opacity = 0; });
+  node.addEventListener("click", () => showStation(r));
+}
+
+async function showStation(r) {
+  document.querySelectorAll(".dot.sel").forEach(n => n.classList.remove("sel"));
+  document.querySelectorAll(`[data-station="${r.station}"]`).forEach(n => n.classList.add("sel"));
+  $("#detailPanel").hidden = false;
+  $("#detailName").textContent = r.name;
+  $("#detailNote").textContent = "Loading…";
+
+  let detail;
+  try {
+    detail = window.__STATIONS__?.[r.station] ?? await (await fetch(`./stations/${r.station}.json`)).json();
+  } catch { $("#detailNote").textContent = "No detail available for this station."; return; }
+
+  const years = detail.years.filter(y => y.usable);
+  const first = years[0]?.year, last = years.at(-1)?.year;
+  $("#detailNote").textContent =
+    `Flood days per year, ${first}–${last}. ${years.length} usable years; ` +
+    `${detail.years.length - years.length} excluded for incomplete observations.`;
+  drawHistory(years);
+}
+
+function drawHistory(years) {
+  const svg = $("#history"); svg.replaceChildren();
+  if (!years.length) return;
+  const W = 900, H = 240, L = 38, B = 30, T = 12, R = 8;
+  const yMax = Math.max(...years.map(y => y.flood_days), 1) * 1.1;
+  const y0 = years[0].year, y1 = years.at(-1).year;
+  const X = y => L + (y - y0) / Math.max(y1 - y0, 1) * (W - L - R);
+  const Y = v => H - B - v / yMax * (H - B - T);
+  const bw = Math.max(2, (W - L - R) / Math.max(years.length, 1) - 2);
+
+  const g = el("g", { class: "grid" });
+  for (let i = 0; i <= 4; i++) {
+    const y = Y(yMax * i / 4);
+    g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y }));
+    const t = el("text", { x: L - 7, y: y + 3.5, "text-anchor": "end" });
+    t.textContent = Math.round(yMax * i / 4); g.appendChild(t);
+  }
+  svg.appendChild(g);
+
+  years.forEach(y => {
+    const h = (H - B) - Y(y.flood_days);
+    const bar = el("rect", {
+      x: X(y.year) - bw / 2, y: Y(y.flood_days), width: bw, height: Math.max(h, 0.8),
+      rx: Math.min(2, bw / 2), fill: "var(--s3)",
+    });
+    bar.addEventListener("mousemove", e => {
+      const tip = $("#tip");
+      tip.innerHTML = `<b>${y.year}</b><span class="r">${y.flood_days} flood days<br>${fmt(y.flood_hours, 0)} hours underwater</span>`;
+      tip.style.opacity = 1;
+      tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
+      tip.style.top = (e.clientY + 16) + "px";
+    });
+    bar.addEventListener("mouseleave", () => { $("#tip").style.opacity = 0; });
+    svg.appendChild(bar);
+  });
+
+  const ax = el("g", { class: "axis" });
+  ax.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B }));
+  svg.appendChild(ax);
+  [y0, y1].forEach((y, i) => {
+    const t = el("text", { x: X(y), y: H - B + 16, "text-anchor": i ? "end" : "start" });
+    t.textContent = y; svg.appendChild(t);
+  });
+}
+
+// Bootstrap last. `radius` and `maxDays` are const arrows, so calling render() from
+// above their declarations hits the temporal dead zone -- which fails at run time only
+// for the charts that use them, and silently if errors are not isolated.
+try {
+  const data = await load();
+  stations = data.stations.filter(s => s.lat != null && s.days_per_year != null);
+  render();
+} catch (err) {
+  console.error(err);
+  $("#cards").innerHTML = '<p class="empty">No data yet — run the aggregation.</p>';
+}
+</script>
