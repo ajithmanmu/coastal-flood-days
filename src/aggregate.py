@@ -1,0 +1,172 @@
+"""Turn thousands of raw station-year files into the two artifacts everything else reads.
+
+    results/flood_days.parquet   the dataset -- every station-year, nothing hidden
+    results/map_summary.json     ~137 rows, what the map loads on first paint
+
+The split is deliberate. The Parquet file is the contribution: the bulk duration record
+that does not exist anywhere else. The JSON is a viewer convenience -- small enough that
+the map draws immediately instead of waiting on the full dataset.
+
+Nothing here calls NOAA for water levels. It reads what the backfill already cached, so
+it can be re-run freely as thresholds or rules change.
+"""
+
+import json
+from pathlib import Path
+
+import pandas as pd
+import requests
+
+from flood_days import fetch_threshold, summarise_year
+from storage import cached_years, load_year
+
+HTF_ANNUAL = "https://api.tidesandcurrents.noaa.gov/dpapi/prod/webapi/htf/htf_annual.json"
+RESULTS = Path(__file__).resolve().parents[1] / "data" / "results"
+
+# Rule 8. A trend needs two full 18.6-year lunar nodal cycles, or the cycle itself can
+# masquerade as one. Stations below this get published in the dataset but must not carry
+# a trend claim.
+MIN_YEARS_FOR_TREND = 37
+
+
+def station_index(refresh: bool = False) -> pd.DataFrame:
+    """Station id, name and position for every station NOAA publishes flood counts for.
+
+    Cached, because it is also the definitive list of which stations matter -- and it
+    doubles as NOAA's own answer for validation.
+    """
+    cache = RESULTS / "station_index.parquet"
+    if cache.exists() and not refresh:
+        return pd.read_parquet(cache)
+
+    rows = requests.get(HTF_ANNUAL, timeout=60).json()["AnnualFloodCount"]
+    frame = pd.DataFrame(rows)
+    index = (
+        frame.groupby("stnId")
+        .agg(name=("stnName", "first"), lat=("lat", "first"), lon=("lon", "first"))
+        .reset_index()
+        .rename(columns={"stnId": "station"})
+    )
+    index[["lat", "lon"]] = index[["lat", "lon"]].astype(float)
+
+    noaa_counts = frame.rename(columns={"stnId": "station", "minCount": "noaa_days"})
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    index.to_parquet(cache)
+    noaa_counts[["station", "year", "noaa_days"]].to_parquet(
+        RESULTS / "noaa_counts.parquet"
+    )
+    return index
+
+
+def station_years(station_id: str, threshold: float) -> list[dict]:
+    """Summarise every cached year for one station. Empty years are skipped, not zeroed --
+    rule 5: an absent year is unknown, not a year without floods."""
+    rows = []
+    for year in cached_years(station_id):
+        heights = load_year(station_id, year)
+        if heights.empty:
+            continue
+        summary = summarise_year(heights, threshold, year)
+        rows.append(
+            {
+                "station": station_id,
+                "year": summary.year,
+                "flood_days": summary.flood_days,
+                "flood_hours": summary.flood_hours,
+                "hours_per_flood_day": summary.hours_per_flood_day,
+                "completeness": round(summary.completeness, 4),
+                "usable": summary.usable,
+            }
+        )
+    return rows
+
+
+def build(stations: list[str] | None = None) -> pd.DataFrame:
+    index = station_index()
+    targets = stations or index["station"].tolist()
+
+    rows = []
+    for station_id in targets:
+        if not cached_years(station_id):
+            continue
+        try:
+            threshold = fetch_threshold(station_id)
+        except Exception:
+            continue  # no published threshold means the station cannot be counted
+        rows.extend(station_years(station_id, threshold))
+
+    if not rows:
+        return pd.DataFrame()
+
+    results = pd.DataFrame(rows).merge(index, on="station", how="left")
+    return results.sort_values(["station", "year"]).reset_index(drop=True)
+
+
+def summarise_stations(results: pd.DataFrame) -> pd.DataFrame:
+    """One row per station -- what the map needs, and only what it needs.
+
+    Every figure here is computed from usable years only. A station with six missing
+    years must not look calmer than one with none.
+    """
+    usable = results[results["usable"]]
+    if usable.empty:
+        return pd.DataFrame()
+
+    recent = usable[usable["year"] >= usable["year"].max() - 9]
+
+    per_station = recent.groupby("station").agg(
+        days_per_year=("flood_days", "mean"),
+        hours_per_year=("flood_hours", "mean"),
+    )
+    # Computed from the totals, not as a mean of ratios -- averaging ratios lets a
+    # single quiet year with one short flood dominate the number.
+    totals = recent.groupby("station").agg(
+        total_days=("flood_days", "sum"), total_hours=("flood_hours", "sum")
+    )
+    per_station["hours_per_flood_day"] = (
+        totals["total_hours"] / totals["total_days"].replace(0, pd.NA)
+    )
+
+    span = usable.groupby("station")["year"].agg(
+        first_year="min", last_year="max", usable_years="count"
+    )
+    per_station = per_station.join(span)
+    per_station["trend_supported"] = per_station["usable_years"] >= MIN_YEARS_FOR_TREND
+
+    meta = results.groupby("station")[["name", "lat", "lon"]].first()
+    return per_station.join(meta).reset_index().round(3)
+
+
+def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    results.to_parquet(RESULTS / "flood_days.parquet", index=False)
+    (RESULTS / "map_summary.json").write_text(
+        json.dumps(
+            {
+                "generated": pd.Timestamp.utcnow().isoformat(),
+                "note": "hours above NOS minor threshold at the gauge; not road-closure time",
+                "stations": json.loads(summary.to_json(orient="records")),
+            },
+            indent=1,
+        )
+    )
+
+
+if __name__ == "__main__":
+    import sys
+
+    wanted = sys.argv[1:] or None
+    results = build(wanted)
+    if results.empty:
+        print("nothing cached yet")
+        raise SystemExit(1)
+
+    summary = summarise_stations(results)
+    write(results, summary)
+
+    print(f"station-years : {len(results)}")
+    print(f"usable        : {int(results['usable'].sum())}")
+    print(f"stations      : {results['station'].nunique()}")
+    print(f"trend-capable : {int(summary['trend_supported'].sum())}\n")
+    print(summary[["station", "name", "days_per_year", "hours_per_year",
+                   "hours_per_flood_day", "usable_years", "trend_supported"]].to_string(index=False))
