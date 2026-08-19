@@ -13,11 +13,11 @@
     --axis: #c3c2b7;
     --hair: rgba(11, 11, 11, 0.10);
     /* Sequential blue, low -> high. Light surface: light -> dark. */
-    --s1: #9ec5f4;
-    --s2: #6da7ec;
-    --s3: #3987e5;
-    --s4: #256abf;
-    --s5: #104281;
+    --s1: #86b6ef;
+    --s2: #5598e7;
+    --s3: #2a78d6;
+    --s4: #1c5cab;
+    --s5: #0d366b;
     --land: #efeeea;
   }
   @media (prefers-color-scheme: dark) {
@@ -33,9 +33,9 @@
       --hair: rgba(255, 255, 255, 0.10);
       /* Dark surface: the ramp runs dark -> light so magnitude still reads as weight. */
       --s1: #1c5cab;
-      --s2: #2a78d6;
-      --s3: #3987e5;
-      --s4: #86b6ef;
+      --s2: #3987e5;
+      --s3: #6da7ec;
+      --s4: #9ec5f4;
       --s5: #cde2fb;
       --land: #232322;
     }
@@ -51,9 +51,9 @@
     --axis: #383835;
     --hair: rgba(255, 255, 255, 0.10);
     --s1: #1c5cab;
-    --s2: #2a78d6;
-    --s3: #3987e5;
-    --s4: #86b6ef;
+    --s2: #3987e5;
+    --s3: #6da7ec;
+    --s4: #9ec5f4;
     --s5: #cde2fb;
     --land: #232322;
   }
@@ -115,8 +115,9 @@
   <h1>Coastal Flood Days</h1>
   <p class="sub">
     NOAA publishes how many <em>days</em> each coastal station floods. It doesn't publish
-    how long those floods last. A forty-minute exceedance at high tide and a six-hour
-    inundation both count as one day. This measures the hours.
+    how long those floods last. Across these 137 gauges a flood day means anything from
+    just over an hour above the threshold to most of a day — and every one of them counts
+    the same. This measures the hours.
   </p>
 
   <div class="cards" id="cards"></div>
@@ -136,7 +137,7 @@
         <span class="sw" style="background:var(--s1)"></span><span class="sw" style="background:var(--s2)"></span>
         <span class="sw" style="background:var(--s3)"></span><span class="sw" style="background:var(--s4)"></span>
         <span class="sw" style="background:var(--s5)"></span>
-        <span style="margin-left:4px">under 1.5 → over 5</span>
+        <span style="margin-left:4px">under 1.8 → over 5.4</span>
       </span>
       <span id="sizekey" class="swatches"></span>
     </div>
@@ -172,8 +173,17 @@ const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (cons
 const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? "–" : (+v).toFixed(d);
 
 // Colour classes for hours-per-flood-day. Five bins: past ~7, adjacent classes blur.
-const BINS = [1.5, 2.5, 3.5, 5];
+// Boundaries are the observed quintiles, not round numbers -- the distribution is
+// heavily right-skewed (median 2.6, max 22.3), and even bins put a third of the
+// stations in one class and left the map a single shade of blue.
+const BINS = [1.8, 2.4, 3.6, 5.4];
 const band = v => v == null ? "var(--muted)" : `var(--s${BINS.findIndex(b => v < b) + 1 || 5})`;
+
+// The Louisiana river gauges sit so far above the rest that a linear axis fitted to
+// them squashes every other station into the corner. Clip the plot and pin the
+// off-scale ones to the edge, labelled -- hiding them would hide the strongest
+// examples of the very effect this page is about.
+const SCATTER_CLIP = 300;
 
 async function load() {
   if (window.__DATA__) return window.__DATA__;
@@ -240,7 +250,7 @@ function drawScatter(rows) {
   const svg = $("#scatter"); svg.replaceChildren();
   const W = 380, H = 330, L = 44, B = 42, T = 10, R = 10;
   const xMax = Math.max(...rows.map(r => r.days_per_year), 1) * 1.08;
-  const yMax = Math.max(...rows.map(r => r.hours_per_year), 1) * 1.08;
+  const yMax = Math.min(Math.max(...rows.map(r => r.hours_per_year), 1) * 1.08, SCATTER_CLIP);
   const X = v => L + v / xMax * (W - L - R);
   const Y = v => H - B - v / yMax * (H - B - T);
 
@@ -267,13 +277,45 @@ function drawScatter(rows) {
   const yt = el("text", { x: -(T + H - B) / 2, y: 13, transform: "rotate(-90)", "text-anchor": "middle", class: "axis-title" });
   yt.textContent = "hours underwater per year"; svg.appendChild(yt);
 
+  // Rays from the origin are lines of constant hours-per-flood-day, because the ratio
+  // IS y/x. The fingerprint is the chart's geometry rather than a third encoding.
+  const guides = el("g");
+  [2, 4, 8].forEach(ratio => {
+    const atX = Math.min(xMax, yMax / ratio);
+    guides.appendChild(el("line", {
+      x1: X(0), y1: Y(0), x2: X(atX), y2: Y(atX * ratio),
+      stroke: "var(--grid)", "stroke-width": 1,
+    }));
+    const t = el("text", { x: X(atX) - 2, y: Y(atX * ratio) - 4, "text-anchor": "end" });
+    t.textContent = `${ratio} hrs/day`; guides.appendChild(t);
+  });
+  svg.insertBefore(guides, svg.firstChild);
+
+  const offscale = [];
   rows.forEach(r => {
+    if (r.hours_per_year > yMax) { offscale.push(r); return; }
     const c = el("circle", {
       class: "dot", cx: X(r.days_per_year), cy: Y(r.hours_per_year), r: 5,
       fill: band(r.hours_per_flood_day), "data-station": r.station,
     });
     wire(c, r); svg.appendChild(c);
   });
+
+  // Off-scale stations pinned to the top edge as triangles, so they are visibly
+  // present and clickable rather than quietly dropped.
+  offscale.forEach(r => {
+    const x = X(Math.min(r.days_per_year, xMax)), y = Y(yMax) + 4;
+    const m = el("path", {
+      class: "dot", d: `M${x} ${y - 7} L${x + 5} ${y + 2} L${x - 5} ${y + 2} Z`,
+      fill: band(r.hours_per_flood_day), "data-station": r.station,
+    });
+    wire(m, r); svg.appendChild(m);
+  });
+  if (offscale.length) {
+    const t = el("text", { x: L + 2, y: T + 8, "text-anchor": "start" });
+    t.textContent = `▲ ${offscale.length} above ${yMax} hrs (river-influenced gauges)`;
+    svg.appendChild(t);
+  }
 }
 
 function drawSizeKey() {
