@@ -124,9 +124,12 @@
 
   <div class="panel">
     <h2>Where floods are frequent, and where they linger</h2>
-    <p class="note">Circle area = flood days per year. Colour = hours above the threshold per flood day. Last 10 years, usable years only.</p>
+    <p class="note">Left: where floods linger — colour is hours above the threshold per flood day. Right: how often against how long, with rays marking constant hours per flood. Last 10 years, usable years only.</p>
     <div class="split">
-      <div><svg id="map" viewBox="0 0 640 400" role="img" aria-label="US coastal stations"></svg></div>
+      <div>
+        <svg id="map" viewBox="0 0 640 400" role="img" aria-label="US coastal stations"></svg>
+        <p class="note" id="offmap" style="margin:6px 0 0"></p>
+      </div>
       <div>
         <svg id="scatter" viewBox="0 0 380 330" role="img" aria-label="Frequency versus duration"></svg>
       </div>
@@ -139,7 +142,6 @@
         <span class="sw" style="background:var(--s5)"></span>
         <span style="margin-left:4px">under 1.8 → over 5.4</span>
       </span>
-      <span id="sizekey" class="swatches"></span>
     </div>
   </div>
 
@@ -192,10 +194,21 @@ async function load() {
   return r.json();
 }
 
+// The outline is a nicety, not a requirement -- if it fails to load the map still
+// plots, so this never blocks the page.
+async function loadLand() {
+  try { return await (await fetch("./us-states.json")).json(); } catch { return null; }
+}
+
 let stations = [];
 
-function render() {
-  const conus = stations.filter(s => s.lon < -60 && s.lon > -130 && s.lat < 50);
+function render(land) {
+  // Filter by the frame the map actually draws, not a loose bounding box. The old test
+  // let Puerto Rico and the US Virgin Islands through, and they rendered as loose dots
+  // floating below Florida outside the landmass.
+  const inFrame = s => s.lon >= CONUS.lon0 && s.lon <= CONUS.lon1 && s.lat >= CONUS.lat0 && s.lat <= CONUS.lat1;
+  const conus = stations.filter(inFrame);
+  const elsewhere = stations.length - conus.length;
   const trendable = stations.filter(s => s.trend_supported).length;
   const worst = [...stations].sort((a, b) => b.hours_per_flood_day - a.hours_per_flood_day)[0];
 
@@ -208,38 +221,49 @@ function render() {
 
   // Each chart is isolated: a single bad station should degrade one panel, not blank
   // the page. Found the hard way -- a one-station map produced a zero-width extent.
-  for (const [fn, arg] of [[drawMap, conus], [drawScatter, stations], [drawTable, stations], [drawSizeKey, null]]) {
-    try { fn(arg); } catch (err) { console.error(fn.name, err); }
+  for (const [fn, arg] of [[drawMap, conus], [drawScatter, stations], [drawTable, stations]]) {
+    try { fn(arg, land); } catch (err) { console.error(fn.name, err); }
   }
+
+  // Never drop stations quietly. They stay in the chart, the table and the totals.
+  $("#offmap").textContent = elsewhere
+    ? `${elsewhere} stations in Hawaii, the Pacific and the Caribbean are outside this frame. They are included everywhere else on the page.`
+    : "";
 }
 
-// Area-proportional radius: perceived size must track the value, not the radius.
-const maxDays = () => Math.max(...stations.map(s => s.days_per_year), 1);
-const radius = v => 2.2 + 11 * Math.sqrt(Math.max(v, 0) / maxDays());
+// Fixed CONUS bounds rather than an extent derived from the stations. The gauges are
+// all coastal, so fitting to them crops the interior off and the country stops being
+// recognisable -- the landmass has to set the frame, not the data.
+const CONUS = { lon0: -125.0, lon1: -66.9, lat0: 24.4, lat1: 49.4 };
 
-function drawMap(rows) {
+function drawMap(rows, land) {
   const svg = $("#map"); svg.replaceChildren();
-  const W = 640, H = 400, pad = 18;
-  if (!rows.length) return;
-  const lons = rows.map(r => r.lon), lats = rows.map(r => r.lat);
-  // A degenerate extent (one station, or several at one spot) divides by zero and
-  // poisons every coordinate with NaN. Give it a minimum span instead.
-  const span = (lo, hi, min) => (hi - lo < min ? [(lo + hi) / 2 - min / 2, (lo + hi) / 2 + min / 2] : [lo, hi]);
-  const [lon0, lon1] = span(Math.min(...lons), Math.max(...lons), 4);
-  const [lat0, lat1] = span(Math.min(...lats), Math.max(...lats), 3);
-  // cos(mid-latitude) keeps longitude degrees from stretching the coast sideways.
+  const W = 640, H = 400, pad = 10;
+  const { lon0, lon1, lat0, lat1 } = CONUS;
+  // cos(mid-latitude) keeps longitude degrees from stretching the country sideways.
   const k = Math.cos((lat0 + lat1) / 2 * Math.PI / 180);
-  const sx = (W - pad * 2) / ((lon1 - lon0) * k), sy = (H - pad * 2) / (lat1 - lat0);
-  const s = Math.min(sx, sy);
+  const s = Math.min((W - pad * 2) / ((lon1 - lon0) * k), (H - pad * 2) / (lat1 - lat0));
   const ox = pad + ((W - pad * 2) - (lon1 - lon0) * k * s) / 2;
   const oy = pad + ((H - pad * 2) - (lat1 - lat0) * s) / 2;
   const X = lon => ox + (lon - lon0) * k * s;
   const Y = lat => oy + (lat1 - lat) * s;
 
-  // Draw larger circles first so small ones stay clickable on top.
-  [...rows].sort((a, b) => b.days_per_year - a.days_per_year).forEach(r => {
+  // Land first, recessive -- it orients the reader and carries no data.
+  if (land) {
+    const g = el("g");
+    land.rings.forEach(ring => {
+      const d = ring.map(([lon, lat], i) => `${i ? "L" : "M"}${X(lon).toFixed(1)} ${Y(lat).toFixed(1)}`).join("") + "Z";
+      g.appendChild(el("path", { d, fill: "var(--land)", stroke: "var(--grid)", "stroke-width": 0.5 }));
+    });
+    svg.appendChild(g);
+  }
+
+  // One encoding only. The scatter carries frequency-versus-duration; asking the map to
+  // repeat it with circle size made the reader decode two channels to learn nothing new.
+  // Here the map answers one question: where does flooding linger?
+  rows.forEach(r => {
     const c = el("circle", {
-      class: "dot", cx: X(r.lon), cy: Y(r.lat), r: radius(r.days_per_year),
+      class: "dot", cx: X(r.lon), cy: Y(r.lat), r: 4.5,
       fill: band(r.hours_per_flood_day), "data-station": r.station,
     });
     wire(c, r); svg.appendChild(c);
@@ -316,20 +340,6 @@ function drawScatter(rows) {
     t.textContent = `▲ ${offscale.length} above ${yMax} hrs (river-influenced gauges)`;
     svg.appendChild(t);
   }
-}
-
-function drawSizeKey() {
-  const key = $("#sizekey"); key.replaceChildren();
-  const label = document.createElement("span"); label.textContent = "days / yr";
-  key.appendChild(label);
-  const m = maxDays();
-  [Math.round(m / 4), Math.round(m / 2), Math.round(m)].forEach(v => {
-    const svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("width", 30); svg.setAttribute("height", 28); svg.style.overflow = "visible";
-    const c = el("circle", { cx: 15, cy: 16, r: radius(v), fill: "none", stroke: "var(--axis)", "stroke-width": 1.2 });
-    svg.appendChild(c); key.appendChild(svg);
-    const t = document.createElement("span"); t.textContent = v; t.style.marginLeft = "-6px"; key.appendChild(t);
-  });
 }
 
 function drawTable(rows) {
@@ -428,7 +438,7 @@ function drawHistory(years) {
 try {
   const data = await load();
   stations = data.stations.filter(s => s.lat != null && s.days_per_year != null);
-  render();
+  render(await loadLand());
 } catch (err) {
   console.error(err);
   $("#cards").innerHTML = '<p class="empty">No data yet — run the aggregation.</p>';
