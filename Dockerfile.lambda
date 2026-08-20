@@ -1,0 +1,11 @@
+# Lambda needs AWS's runtime interface, so this uses their base image rather than the
+# plain python:slim the Fargate backfill runs on. Same source, different entry contract.
+FROM --platform=linux/arm64 public.ecr.aws/lambda/python:3.13
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt -t "${LAMBDA_TASK_ROOT}"
+
+COPY src/ "${LAMBDA_TASK_ROOT}/"
+
+# module.function -- daily.py's handler.
+CMD ["daily.handler"]

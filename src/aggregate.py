@@ -18,7 +18,8 @@ import pandas as pd
 import requests
 
 from flood_days import fetch_threshold, summarise_year
-from storage import cached_years, load_year
+from storage import (cached_years, load_year, results_exists, results_read_parquet,
+                     results_write_parquet, results_write_text)
 
 HTF_ANNUAL = "https://api.tidesandcurrents.noaa.gov/dpapi/prod/webapi/htf/htf_annual.json"
 RESULTS = Path(__file__).resolve().parents[1] / "data" / "results"
@@ -35,9 +36,8 @@ def station_index(refresh: bool = False) -> pd.DataFrame:
     Cached, because it is also the definitive list of which stations matter -- and it
     doubles as NOAA's own answer for validation.
     """
-    cache = RESULTS / "station_index.parquet"
-    if cache.exists() and not refresh:
-        return pd.read_parquet(cache)
+    if results_exists("station_index.parquet") and not refresh:
+        return results_read_parquet("station_index.parquet")
 
     rows = requests.get(HTF_ANNUAL, timeout=60).json()["AnnualFloodCount"]
     frame = pd.DataFrame(rows)
@@ -50,11 +50,8 @@ def station_index(refresh: bool = False) -> pd.DataFrame:
     index[["lat", "lon"]] = index[["lat", "lon"]].astype(float)
 
     noaa_counts = frame.rename(columns={"stnId": "station", "minCount": "noaa_days"})
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    index.to_parquet(cache)
-    noaa_counts[["station", "year", "noaa_days"]].to_parquet(
-        RESULTS / "noaa_counts.parquet"
-    )
+    results_write_parquet("station_index.parquet", index)
+    results_write_parquet("noaa_counts.parquet", noaa_counts[["station", "year", "noaa_days"]])
     return index
 
 
@@ -145,10 +142,9 @@ def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
     station's full century into the summary would make the map wait on data most
     visitors never look at.
     """
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    results.to_parquet(RESULTS / "flood_days.parquet", index=False)
+    results_write_parquet("flood_days.parquet", results)
 
-    (RESULTS / "map_summary.json").write_text(
+    results_write_text("map_summary.json",
         json.dumps(
             {
                 "generated": pd.Timestamp.utcnow().isoformat(),
@@ -156,14 +152,11 @@ def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
                 "stations": json.loads(summary.to_json(orient="records")),
             },
             indent=1,
-        )
-    )
+        ))
 
-    detail_dir = RESULTS / "stations"
-    detail_dir.mkdir(exist_ok=True)
     for station_id, block in results.groupby("station"):
         series = block[["year", "flood_days", "flood_hours", "completeness", "usable"]]
-        (detail_dir / f"{station_id}.json").write_text(
+        results_write_text(f"stations/{station_id}.json",
             json.dumps(
                 {
                     "station": station_id,
@@ -171,8 +164,7 @@ def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
                     "years": json.loads(series.to_json(orient="records")),
                 },
                 separators=(",", ":"),
-            )
-        )
+            ))
 
 
 if __name__ == "__main__":

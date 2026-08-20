@@ -33,6 +33,11 @@ from flood_days import DATUM, TIME_ZONE, UNITS
 DEFAULT_LOCAL = Path(__file__).resolve().parents[1] / "data" / "raw"
 RAW_URI = os.environ.get("RAW_URI", str(DEFAULT_LOCAL))
 
+# The published artifacts. Same local-or-S3 arrangement as the raw layer, so the daily
+# Lambda and a laptop run write to the same place by changing one variable.
+DEFAULT_RESULTS = Path(__file__).resolve().parents[1] / "data" / "results"
+RESULTS_URI = os.environ.get("RESULTS_URI", str(DEFAULT_RESULTS))
+
 
 def _key(station_id: str, year: int) -> str:
     return f"station={station_id}/year={year}.parquet"
@@ -165,3 +170,57 @@ def cached_years(station_id: str) -> list[int]:
             stem = item["Key"].rsplit("/", 1)[-1].removesuffix(".parquet")
             years.append(int(stem.split("=")[1]))
     return sorted(years)
+
+
+# --- published artifacts -------------------------------------------------------------
+# Deliberately separate from the raw helpers above: raw objects are keyed by station and
+# year, these are named files, and conflating the two made the call sites unreadable.
+
+
+def _results_target(name: str) -> tuple[str, str] | Path:
+    if RESULTS_URI.startswith("s3://"):
+        bucket, _, prefix = RESULTS_URI[len("s3://"):].partition("/")
+        return bucket, f"{prefix.strip('/')}/{name}" if prefix.strip("/") else name
+    return Path(RESULTS_URI) / name
+
+
+def results_exists(name: str) -> bool:
+    target = _results_target(name)
+    if isinstance(target, Path):
+        return target.exists()
+    try:
+        _s3().head_object(Bucket=target[0], Key=target[1])
+        return True
+    except Exception:
+        return False
+
+
+def results_read_parquet(name: str) -> pd.DataFrame:
+    target = _results_target(name)
+    if isinstance(target, Path):
+        return pd.read_parquet(target)
+    body = _s3().get_object(Bucket=target[0], Key=target[1])["Body"].read()
+    return pd.read_parquet(io.BytesIO(body))
+
+
+def results_write_parquet(name: str, frame: pd.DataFrame) -> None:
+    target = _results_target(name)
+    if isinstance(target, Path):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(target, index=False)
+        return
+    buffer = io.BytesIO()
+    frame.to_parquet(buffer, index=False)
+    _s3().put_object(Bucket=target[0], Key=target[1], Body=buffer.getvalue())
+
+
+def results_write_text(name: str, text: str, content_type: str = "application/json") -> None:
+    target = _results_target(name)
+    if isinstance(target, Path):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+        return
+    # Short max-age: these objects are replaced in place every day, so a long TTL would
+    # serve yesterday's numbers. The opposite of the immutable raw layer.
+    _s3().put_object(Bucket=target[0], Key=target[1], Body=text.encode(),
+                     ContentType=content_type, CacheControl="public, max-age=300")

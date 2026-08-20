@@ -31,3 +31,16 @@ output "logs_command" {
   description = "Follow progress."
   value       = "aws logs tail ${aws_cloudwatch_log_group.backfill.name} --follow --profile ${var.profile} --region ${var.region}"
 }
+
+output "daily_ecr_url" {
+  value = aws_ecr_repository.daily.repository_url
+}
+
+output "invoke_daily_now" {
+  value = "aws lambda invoke --function-name ${aws_lambda_function.daily.function_name} --profile ${var.profile} --region ${var.region} /tmp/daily.json"
+}
+
+output "subscribe_to_alerts" {
+  description = "Run this, then confirm the email. Alarms are inert without a subscriber."
+  value       = "aws sns subscribe --topic-arn ${aws_sns_topic.alerts.arn} --protocol email --notification-endpoint YOUR@EMAIL --profile ${var.profile} --region ${var.region}"
+}
