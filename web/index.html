@@ -187,9 +187,14 @@ const band = v => v == null ? "var(--muted)" : `var(--s${BINS.findIndex(b => v <
 // examples of the very effect this page is about.
 const SCATTER_CLIP = 300;
 
+// Data lives alongside the page in the same bucket, behind the same CloudFront
+// distribution -- same origin, so no CORS, and the edge absorbs the traffic. The local
+// dev folder mirrors this layout exactly so paths are identical either way.
+const DATA = "./results";
+
 async function load() {
   if (window.__DATA__) return window.__DATA__;
-  const r = await fetch("./map_summary.json");
+  const r = await fetch(`${DATA}/map_summary.json`);
   if (!r.ok) throw new Error("no data");
   return r.json();
 }
@@ -376,7 +381,7 @@ async function showStation(r) {
 
   let detail;
   try {
-    detail = window.__STATIONS__?.[r.station] ?? await (await fetch(`./stations/${r.station}.json`)).json();
+    detail = window.__STATIONS__?.[r.station] ?? await (await fetch(`${DATA}/stations/${r.station}.json`)).json();
   } catch { $("#detailNote").textContent = "No detail available for this station."; return; }
 
   const years = detail.years.filter(y => y.usable);

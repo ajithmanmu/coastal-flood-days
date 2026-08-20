@@ -220,7 +220,9 @@ def results_write_text(name: str, text: str, content_type: str = "application/js
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
         return
-    # Short max-age: these objects are replaced in place every day, so a long TTL would
-    # serve yesterday's numbers. The opposite of the immutable raw layer.
+    # One hour. These objects are replaced in place once a day at a known time, so an
+    # hour bounds staleness tightly while still serving almost everything from the edge.
+    # A day-long TTL would show yesterday's numbers half a day after they changed, for no
+    # meaningful saving; five minutes sends pointless traffic to the origin.
     _s3().put_object(Bucket=target[0], Key=target[1], Body=text.encode(),
-                     ContentType=content_type, CacheControl="public, max-age=300")
+                     ContentType=content_type, CacheControl="public, max-age=3600")
