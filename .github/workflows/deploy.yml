@@ -27,9 +27,10 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://d39egagpmdjbzd.cloudfront.net
+    # No `environment:` block here on purpose. Declaring one rewrites the OIDC subject
+    # claim from `repo:OWNER/REPO:ref:refs/heads/main` to `repo:OWNER/REPO:environment:NAME`,
+    # which stops matching the trust policy. Widening the policy to accept the environment
+    # subject would let a workflow on any branch assume the role, so the branch pin wins.
     env:
       CI: "true"
       DISTRIBUTION_ID: E1WGHQRL9XD896
