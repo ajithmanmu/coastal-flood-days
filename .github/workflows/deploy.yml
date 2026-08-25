@@ -39,23 +39,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TEMPORARY: prints the identity claims only (never the token or signature) so the
-      # trust policy can be matched against what GitHub actually sends.
-      - name: Debug OIDC claims
-        run: |
-          set -euo pipefail
-          VALUE=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
-          python3 - "$VALUE" <<'PY'
-          import base64, json, sys
-          part = sys.argv[1].split('.')[1]
-          part += '=' * (-len(part) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(part))
-          keep = ("sub", "aud", "repository", "ref", "event_name", "workflow_ref", "iss")
-          print(json.dumps({k: claims[k] for k in keep if k in claims}, indent=1))
-          PY
-
       - name: Assume deploy role
         uses: aws-actions/configure-aws-credentials@v4
         with:

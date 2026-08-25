@@ -16,6 +16,31 @@ variable "github_repo" {
   default     = "ajithmanmu/coastal-flood-days"
 }
 
+# This account emits OIDC subjects with immutable IDs, so the subject is
+#   repo:OWNER@OWNERID/REPO@REPOID:ref:refs/heads/main
+# not the plain `repo:OWNER/REPO:...` form most examples show. Pinning the numeric IDs is
+# deliberate and stronger than the name form: renaming or deleting the repo will not let a
+# different repository that later claims the same name assume this role.
+#
+# Read the live values from a workflow run's token claims, not from documentation.
+variable "github_owner_id" {
+  description = "numeric GitHub account id, from the OIDC `sub` claim"
+  type        = string
+  default     = "12849184"
+}
+
+variable "github_repo_id" {
+  description = "numeric GitHub repository id, from the OIDC `sub` claim"
+  type        = string
+  default     = "1335359349"
+}
+
+locals {
+  github_owner = split("/", var.github_repo)[0]
+  github_name  = split("/", var.github_repo)[1]
+  github_sub   = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_name}@${var.github_repo_id}:ref:refs/heads/main"
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
@@ -49,7 +74,15 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/main"]
+      values   = [local.github_sub]
+    }
+
+    # Belt and braces: the subject already pins the repository, but this claim is checked
+    # against the name and would catch an ID transposed into the wrong slot above.
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = [var.github_repo]
     }
   }
 }
