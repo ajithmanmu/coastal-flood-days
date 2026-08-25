@@ -1,6 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coastal Flood Days</title>
+<link rel="stylesheet" href="./vendor/maplibre-gl.css">
 <style>
   :root {
     color-scheme: light;
@@ -12,13 +13,21 @@
     --grid: #e1e0d9;
     --axis: #c3c2b7;
     --hair: rgba(11, 11, 11, 0.10);
-    /* Sequential blue, low -> high. Light surface: light -> dark. */
-    --s1: #86b6ef;
-    --s2: #5598e7;
-    --s3: #2a78d6;
-    --s4: #1c5cab;
-    --s5: #0d366b;
-    --land: #efeeea;
+    /* Sequential warm ramp, low -> high. Deliberately NOT blue: the basemap ocean is
+       blue, and blue-on-blue is exactly why the old map read as "a bunch of blue dots".
+       Warm-on-cool separates data from geography by hue, not just by value. */
+    --s1: #fdd8a5;
+    --s2: #fdae6b;
+    --s3: #f16913;
+    --s4: #d94801;
+    --s5: #8c2d04;
+    /* Basemap: cool and recessive, so it never competes with the data. */
+    --sea: #dbe7f1;
+    --earth: #f3f1eb;
+    --bound: #d3ccbd;
+    --road: #e6e3da;
+    --label: #6f6e67;
+    --label-halo: #f3f1eb;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
@@ -32,12 +41,17 @@
       --axis: #383835;
       --hair: rgba(255, 255, 255, 0.10);
       /* Dark surface: the ramp runs dark -> light so magnitude still reads as weight. */
-      --s1: #1c5cab;
-      --s2: #3987e5;
-      --s3: #6da7ec;
-      --s4: #9ec5f4;
-      --s5: #cde2fb;
-      --land: #232322;
+      --s1: #7a2803;
+      --s2: #b83c01;
+      --s3: #f16913;
+      --s4: #fd9e4f;
+      --s5: #fdd8a5;
+      --sea: #0f1a24;
+      --earth: #21211e;
+      --bound: #35342f;
+      --road: #2b2a26;
+      --label: #8f8d85;
+      --label-halo: #161614;
     }
   }
   :root[data-theme="dark"] {
@@ -50,12 +64,17 @@
     --grid: #2c2c2a;
     --axis: #383835;
     --hair: rgba(255, 255, 255, 0.10);
-    --s1: #1c5cab;
-    --s2: #3987e5;
-    --s3: #6da7ec;
-    --s4: #9ec5f4;
-    --s5: #cde2fb;
-    --land: #232322;
+    --s1: #7a2803;
+    --s2: #b83c01;
+    --s3: #f16913;
+    --s4: #fd9e4f;
+    --s5: #fdd8a5;
+    --sea: #0f1a24;
+    --earth: #21211e;
+    --bound: #35342f;
+    --road: #2b2a26;
+    --label: #8f8d85;
+    --label-halo: #161614;
   }
 
   body {
@@ -66,13 +85,27 @@
   }
   .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 20px 64px; }
 
-  h1 { font-size: 1.6rem; margin: 0 0 6px; letter-spacing: -0.01em; }
-  .sub { color: var(--ink-2); margin: 0 0 28px; max-width: 62ch; }
+  h1 { font-size: 1.75rem; margin: 0 0 8px; letter-spacing: -0.02em; line-height: 1.2; text-wrap: balance; }
+  .sub { color: var(--ink-2); margin: 0 0 22px; max-width: 58ch; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 28px; }
-  .card { background: var(--surface); border: 1px solid var(--hair); border-radius: 10px; padding: 14px 16px; }
-  .card .v { font-size: 1.7rem; line-height: 1.1; }
-  .card .k { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .card { background: var(--surface); border: 1px solid var(--hair); border-radius: 10px; padding: 12px 14px; }
+  .card .v { font-size: 1.6rem; line-height: 1.1; letter-spacing: -0.01em; }
+  .card .k { color: var(--muted); font-size: 0.78rem; margin-top: 4px; line-height: 1.35; }
+
+  /* Phone: the headline and four numbers have to clear the fold so the map is the next
+     thing on screen, not the third scroll. */
+  @media (max-width: 560px) {
+    .wrap { padding: 20px 14px 48px; }
+    h1 { font-size: 1.45rem; }
+    .sub { font-size: 0.9rem; margin-bottom: 16px; }
+    .cards { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+    .card { padding: 10px 11px; }
+    .card .v { font-size: 1.3rem; }
+    .card .k { font-size: 0.72rem; }
+    .panel { padding: 14px 14px 12px; }
+    #map { height: 380px; }
+  }
 
   .panel { background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; padding: 18px 20px 14px; margin-bottom: 20px; }
   .panel h2 { font-size: 0.95rem; margin: 0 0 2px; }
@@ -80,6 +113,18 @@
 
   .split { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; align-items: start; }
   @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+  /* MapLibre needs a real pixel height -- it cannot size itself from content. */
+  #map { height: 460px; border-radius: 10px; overflow: hidden; border: 1px solid var(--hair); background: var(--sea); }
+  #map canvas { outline: none; }
+  .maplibregl-ctrl-attrib { font-size: 10px; }
+
+  .regions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+  .regions button {
+    font: inherit; font-size: 0.78rem; color: var(--ink-2); cursor: pointer;
+    background: var(--plane); border: 1px solid var(--hair); border-radius: 999px; padding: 3px 11px;
+  }
+  .regions button:hover { color: var(--ink); border-color: var(--axis); }
 
   svg { display: block; width: 100%; height: auto; overflow: visible; }
   .dot { cursor: pointer; stroke: var(--surface); stroke-width: 1.25; }
@@ -92,6 +137,8 @@
   .legend { display: flex; flex-wrap: wrap; gap: 22px; align-items: center; margin-top: 12px; color: var(--ink-2); font-size: 0.82rem; }
   .swatches { display: flex; align-items: center; gap: 4px; }
   .sw { width: 26px; height: 11px; border-radius: 2px; }
+  .sizekey { display: flex; align-items: center; gap: 7px; }
+  .sizekey i { display: inline-block; border-radius: 50%; background: var(--muted); opacity: .55; }
 
   table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
   th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
@@ -112,23 +159,18 @@
 </style>
 
 <div class="wrap">
-  <h1>Coastal Flood Days</h1>
-  <p class="sub">
-    NOAA publishes how many <em>days</em> each coastal station floods. It doesn't publish
-    how long those floods last. Across these 137 gauges a flood day means anything from
-    just over an hour above the threshold to most of a day — and every one of them counts
-    the same. This measures the hours.
-  </p>
+  <h1>Floods got <span id="mult">13×</span> more frequent. They didn't get longer.</h1>
+  <p class="sub">NOAA counts the <em>days</em> a coastal gauge floods. It never measures how long each flood lasts. This does — 137 gauges, every year on record.</p>
 
   <div class="cards" id="cards"></div>
 
   <div class="panel">
     <h2>Where floods are frequent, and where they linger</h2>
-    <p class="note">Left: where floods linger — colour is hours above the threshold per flood day. Right: how often against how long, with rays marking constant hours per flood. Last 10 years, usable years only.</p>
+    <p class="note">Circle size is hours underwater per year; colour is hours per flood day. Last 10 usable years.</p>
     <div class="split">
       <div>
-        <svg id="map" viewBox="0 0 640 400" role="img" aria-label="US coastal stations"></svg>
-        <p class="note" id="offmap" style="margin:6px 0 0"></p>
+        <div id="map"></div>
+        <div class="regions" id="regions"></div>
       </div>
       <div>
         <svg id="scatter" viewBox="0 0 380 330" role="img" aria-label="Frequency versus duration"></svg>
@@ -141,6 +183,11 @@
         <span class="sw" style="background:var(--s3)"></span><span class="sw" style="background:var(--s4)"></span>
         <span class="sw" style="background:var(--s5)"></span>
         <span style="margin-left:4px">under 1.8 → over 5.4</span>
+      </span>
+      <span class="sizekey">
+        <span>hrs underwater / yr</span>
+        <i style="width:7px;height:7px"></i><i style="width:13px;height:13px"></i><i style="width:22px;height:22px"></i>
+        <span>5 → 100+</span>
       </span>
     </div>
   </div>
@@ -158,6 +205,12 @@
   </div>
 
   <p class="caveat">
+    <strong>Why this exists.</strong> Across these 137 gauges a flood day means anything from
+    just over an hour above the threshold to most of a day — and NOAA's published counts
+    score every one of them the same. This measures the hours instead.
+  </p>
+
+  <p class="caveat" style="border-top:0; padding-top:0; margin-top:14px">
     <strong>What these numbers are.</strong> Hours the water sat at or above NOAA's NOS minor
     flood threshold at the gauge — <em>exposure duration</em>, not road-closure time. A tide
     gauge measures one point in the water, not the street, and gauges systematically
@@ -168,16 +221,24 @@
 </div>
 <div id="tip"></div>
 
+<!-- Classic script: pmtiles ships an IIFE build that defines a global. MapLibre v6 is
+     ESM-only, so it is imported by the module below. -->
+<script src="./vendor/pmtiles.js"></script>
 <script type="module">
+// Aliased deliberately: MapLibre exports `Map`, which would shadow the built-in Map
+// constructor for the whole module and turn any `new Map()` lookup table into a map widget.
+import { Map as MapLibreMap, NavigationControl, ScaleControl, addProtocol } from "./vendor/maplibre-gl.mjs";
+
 const $ = s => document.querySelector(s);
 const NS = "http://www.w3.org/2000/svg";
 const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
 const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? "–" : (+v).toFixed(d);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 // Colour classes for hours-per-flood-day. Five bins: past ~7, adjacent classes blur.
 // Boundaries are the observed quintiles, not round numbers -- the distribution is
 // heavily right-skewed (median 2.6, max 22.3), and even bins put a third of the
-// stations in one class and left the map a single shade of blue.
+// stations in one class and left the map a single shade.
 const BINS = [1.8, 2.4, 3.6, 5.4];
 const band = v => v == null ? "var(--muted)" : `var(--s${BINS.findIndex(b => v < b) + 1 || 5})`;
 
@@ -192,6 +253,17 @@ const SCATTER_CLIP = 300;
 // dev folder mirrors this layout exactly so paths are identical either way.
 const DATA = "./results";
 
+// One 382 MB archive of vector tiles, read by HTTP range request. The browser pulls the
+// directory at the front, then only the byte ranges for the tiles on screen -- so the
+// page never downloads the file. Extracted from the 137 GB Protomaps planet build for
+// eight boxes covering our stations; see basemap/region.geojson.
+const BASEMAP = "./basemap/protomaps-20260820.pmtiles";
+
+// Hours-per-year spans 0 to 1633 -- an 80x range. Area-proportional (sqrt) sizing, then
+// clamped: without the clamp Berwick alone would be wider than Florida. The top handful
+// of Gulf stations sit at the clamp, so read exact values from the tooltip, not the disc.
+const radius = h => Math.max(3.5, Math.min(22, 1.55 * Math.sqrt(h || 0)));
+
 async function load() {
   if (window.__DATA__) return window.__DATA__;
   const r = await fetch(`${DATA}/map_summary.json`);
@@ -199,101 +271,278 @@ async function load() {
   return r.json();
 }
 
-// The outline is a nicety, not a requirement -- if it fails to load the map still
-// plots, so this never blocks the page.
-async function loadLand() {
-  try { return await (await fetch("./us-states.json")).json(); } catch { return null; }
+let stations = [];
+let map = null;
+let selected = null;
+
+// Views worth jumping to. The old SVG map drew a fixed CONUS frame and silently pushed
+// 15 stations -- including Kwajalein, 5th worst in the dataset -- into a footnote.
+const VIEWS = {
+  "Mainland":   [-125.5, 23.5, -66.0, 49.8],
+  "Gulf Coast": [-98.0, 25.0, -82.0, 31.5],
+  "Northeast":  [-77.5, 36.5, -66.5, 45.2],
+  "Hawaii":     [-160.8, 18.3, -154.3, 22.7],
+  "Caribbean":  [-67.8, 17.2, -64.2, 18.9],
+  "Pacific":    [140.0, -16.0, -150.0, 30.0],
+};
+
+function mapStyle() {
+  return {
+    version: 8,
+    glyphs: "./vendor/glyphs/{fontstack}/{range}.pbf",
+    sources: {
+      base: {
+        type: "vector",
+        url: "pmtiles://" + BASEMAP,
+        attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>',
+      },
+      stations: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+    },
+    layers: [
+      // Ocean is the absence of land in this schema -- there is no sea polygon. The
+      // background paints it, and `earth` is drawn on top as the land.
+      { id: "sea", type: "background", paint: { "background-color": css("--sea") } },
+      { id: "earth", type: "fill", source: "base", "source-layer": "earth",
+        paint: { "fill-color": css("--earth") } },
+      { id: "landuse", type: "fill", source: "base", "source-layer": "landuse", minzoom: 6,
+        filter: ["match", ["get", "kind"], ["park", "nature_reserve", "forest", "wood"], true, false],
+        paint: { "fill-color": css("--bound"), "fill-opacity": 0.28 } },
+      { id: "water", type: "fill", source: "base", "source-layer": "water",
+        paint: { "fill-color": css("--sea") } },
+      { id: "roads", type: "line", source: "base", "source-layer": "roads", minzoom: 8,
+        filter: ["match", ["get", "kind"], ["highway", "major_road"], true, false],
+        paint: {
+          "line-color": css("--road"),
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.4, 12, 1.6],
+        } },
+      { id: "boundaries", type: "line", source: "base", "source-layer": "boundaries",
+        paint: {
+          "line-color": css("--bound"),
+          "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 8, 1.2],
+          "line-dasharray": [2, 1.5],
+        } },
+      { id: "places", type: "symbol", source: "base", "source-layer": "places", minzoom: 4,
+        layout: {
+          "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 4, 10, 10, 13],
+          "text-anchor": "top", "text-offset": [0, 0.4],
+          "symbol-sort-key": ["coalesce", ["get", "sort_key"], 0],
+        },
+        paint: {
+          "text-color": css("--label"),
+          "text-halo-color": css("--label-halo"),
+          "text-halo-width": 1.2,
+        } },
+      // Size and colour carry different facts. They correlate at 0.43, so this is not a
+      // redundant double-encoding -- a small dark dot (rare but long floods) and a large
+      // pale one (frequent but brief) are genuinely different places.
+      { id: "stations", type: "circle", source: "stations",
+        paint: {
+          // `zoom` has to sit directly inside a top-level interpolate/step -- nesting it
+          // in the multiply is rejected at style-validation time.
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            3, ["*", ["get", "r"], 0.75],
+            6, ["*", ["get", "r"], 1.0],
+            10, ["*", ["get", "r"], 1.6]],
+          "circle-color": ["get", "fill"],
+          "circle-opacity": 0.85,
+          "circle-stroke-color": css("--surface"),
+          "circle-stroke-width": 1,
+        } },
+      { id: "stations-sel", type: "circle", source: "stations", filter: ["==", ["get", "station"], ""],
+        paint: {
+          // `zoom` has to sit directly inside a top-level interpolate/step -- nesting it
+          // in the multiply is rejected at style-validation time.
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            3, ["*", ["get", "r"], 0.75],
+            6, ["*", ["get", "r"], 1.0],
+            10, ["*", ["get", "r"], 1.6]],
+          "circle-color": ["get", "fill"],
+          "circle-stroke-color": css("--ink"),
+          "circle-stroke-width": 2.5,
+        } },
+    ],
+  };
 }
 
-let stations = [];
+function stationsGeoJSON(rows) {
+  return {
+    type: "FeatureCollection",
+    features: rows.map(r => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [r.lon, r.lat] },
+      // Colour resolved here rather than in the style: MapLibre paint expressions cannot
+      // read CSS custom properties, so the var() indirection has to be flattened first.
+      properties: { ...r, r: radius(r.hours_per_year), fill: css(band(r.hours_per_flood_day).slice(4, -1)) },
+    })),
+  };
+}
 
-function render(land) {
-  // Filter by the frame the map actually draws, not a loose bounding box. The old test
-  // let Puerto Rico and the US Virgin Islands through, and they rendered as loose dots
-  // floating below Florida outside the landmass.
-  const inFrame = s => s.lon >= CONUS.lon0 && s.lon <= CONUS.lon1 && s.lat >= CONUS.lat0 && s.lat <= CONUS.lat1;
-  const conus = stations.filter(inFrame);
-  const elsewhere = stations.length - conus.length;
-  const trendable = stations.filter(s => s.trend_supported).length;
-  const worst = [...stations].sort((a, b) => b.hours_per_flood_day - a.hours_per_flood_day)[0];
+function drawMap(rows) {
+  const protocol = new pmtiles.Protocol();
+  addProtocol("pmtiles", protocol.tile);
 
-  $("#cards").innerHTML = [
-    [stations.length, "stations"],
-    [trendable, "with 37+ usable years"],
-    [fmt(stations.reduce((a, s) => a + s.hours_per_year, 0) / stations.length), "mean hours underwater / yr"],
-    [worst ? worst.name.split(",")[0] : "–", worst ? `longest floods · ${fmt(worst.hours_per_flood_day)} hrs each` : ""],
-  ].map(([v, k]) => `<div class="card"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
+  map = new MapLibreMap({
+    container: "map",
+    style: mapStyle(),
+    bounds: VIEWS["Mainland"],
+    fitBoundsOptions: { padding: 24 },
+    attributionControl: { compact: true },
+    dragRotate: false,
+    maxZoom: 12,
+  });
+  map.touchZoomRotate.disableRotation();
+  window.__map = map;   // debug handle: inspect layers/features from the console
+  map.addControl(new NavigationControl({ showCompass: false }), "top-right");
+  map.addControl(new ScaleControl({ maxWidth: 90, unit: "imperial" }), "bottom-left");
+
+  map.on("load", () => {
+    // MapLibre measures the container once at construction. If the panel is still
+    // settling -- fonts, grid reflow, a hidden parent -- the canvas keeps that stale
+    // height and paints into part of the box, leaving the rest blank.
+    map.resize();
+    map.fitBounds(VIEWS["Mainland"], { padding: 24, duration: 0 });
+    map.getSource("stations").setData(stationsGeoJSON(rows));
+  });
+  new ResizeObserver(() => map.resize()).observe($("#map"));
+
+  const tip = $("#tip");
+  map.on("mousemove", "stations", e => {
+    map.getCanvas().style.cursor = "pointer";
+    const r = e.features[0].properties;
+    tip.innerHTML = tipHTML(r);
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(e.originalEvent.clientX + 14, innerWidth - 260) + "px";
+    tip.style.top = (e.originalEvent.clientY + 16) + "px";
+  });
+  map.on("mouseleave", "stations", () => {
+    map.getCanvas().style.cursor = "";
+    tip.style.opacity = 0;
+  });
+  map.on("click", "stations", e => showStation(e.features[0].properties));
+
+  const box = $("#regions");
+  box.innerHTML = "";
+  for (const [name, b] of Object.entries(VIEWS)) {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.addEventListener("click", () => map.fitBounds(b, { padding: 24, duration: 700 }));
+    box.appendChild(btn);
+  }
+}
+
+function tipHTML(r) {
+  return `<b>${r.name}</b>
+    <span class="r">${fmt(r.days_per_year)} flood days/yr</span><br>
+    <span class="r">${fmt(r.hours_per_year)} hours/yr</span><br>
+    <span class="r">${fmt(r.hours_per_flood_day, 2)} hrs per flood day</span><br>
+    <span class="r">${r.usable_years} usable years${r.trend_supported === true || r.trend_supported === "true" ? "" : " — too few for a trend"}</span>`;
+}
+
+// The Battery: the longest continuous record in the set (1921-2025) and the station the
+// headline claim rests on. Its full series is a separate 8 KB file.
+const REF_STATION = "8518750";
+
+// Decades with fewer usable years than this are not compared. The Battery's record opens
+// in 1921 with three usable years, all of them zero flood days -- taking that as the
+// baseline makes the frequency multiple infinite instead of the real 13x from the 1930s.
+const MIN_YEARS_PER_DECADE = 5;
+
+function byDecade(years) {
+  const acc = {};
+  for (const y of years) {
+    const d = Math.floor(y.year / 10) * 10;
+    (acc[d] ??= { days: 0, hours: 0, n: 0 });
+    acc[d].days += y.flood_days;
+    acc[d].hours += y.flood_hours;
+    acc[d].n++;
+  }
+  return acc;
+}
+
+// Ratios come from decade totals, not from a mean of per-year ratios: one quiet year with
+// a single short flood would otherwise dominate the number.
+async function headline() {
+  const d = await (await fetch(`${DATA}/stations/${REF_STATION}.json`)).json();
+  const acc = byDecade(d.years.filter(y => y.usable));
+  const decs = Object.keys(acc).map(Number).sort((a, b) => a - b)
+    .filter(k => acc[k].n >= MIN_YEARS_PER_DECADE && acc[k].days > 0);
+  if (decs.length < 2) return null;
+  const a = acc[decs[0]], b = acc[decs.at(-1)];
+  return {
+    place: d.name.split(",")[0],
+    from: decs[0],
+    multiple: (b.days / b.n) / (a.days / a.n),
+    hrsNow: b.hours / b.days,
+    hrsThen: a.hours / a.days,
+  };
+}
+
+function cards(h) {
+  const spread = stations.map(s => s.hours_per_flood_day).filter(v => v > 0);
+  const years = stations.reduce((a, s) => a + (s.usable_years || 0), 0);
+  const rows = [
+    h ? [`${Math.round(h.multiple)}×`, `more flood days at ${h.place} than in the ${h.from}s`]
+      : [stations.length, "coastal gauges"],
+    h ? [`${fmt(h.hrsNow)} hrs`, `how long each one lasts — ${fmt(h.hrsThen)} hrs in the ${h.from}s`]
+      : ["–", "how long each one lasts"],
+    [`${fmt(Math.min(...spread))}–${fmt(Math.max(...spread), 0)} hrs`, "spread between gauges: duration is about place"],
+    [years.toLocaleString(), "station-years computed from hourly readings"],
+  ];
+  return rows.map(([v, k]) => `<div class="card"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
+}
+
+function render() {
+  // Cards paint immediately from the summary, then upgrade once the reference station's
+  // series lands. The map must not wait on an 8 KB file it does not need.
+  $("#cards").innerHTML = cards(null);
 
   // Each chart is isolated: a single bad station should degrade one panel, not blank
   // the page. Found the hard way -- a one-station map produced a zero-width extent.
-  for (const [fn, arg] of [[drawMap, conus], [drawScatter, stations], [drawTable, stations]]) {
-    try { fn(arg, land); } catch (err) { console.error(fn.name, err); }
+  for (const [fn, arg] of [[drawMap, stations], [drawScatter, stations], [drawTable, stations]]) {
+    try { fn(arg); } catch (err) { console.error(fn.name, err); }
   }
 
-  // Never drop stations quietly. They stay in the chart, the table and the totals.
-  $("#offmap").textContent = elsewhere
-    ? `${elsewhere} stations in Hawaii, the Pacific and the Caribbean are outside this frame. They are included everywhere else on the page.`
-    : "";
+  headline().then(h => {
+    if (!h) return;
+    $("#cards").innerHTML = cards(h);
+    // Keep the headline and the card from drifting apart -- both come from one number.
+    $("#mult").textContent = `${Math.round(h.multiple)}×`;
+  }).catch(err => console.error("headline", err));
 }
 
-// Fixed CONUS bounds rather than an extent derived from the stations. The gauges are
-// all coastal, so fitting to them crops the interior off and the country stops being
-// recognisable -- the landmass has to set the frame, not the data.
-const CONUS = { lon0: -125.0, lon1: -66.9, lat0: 24.4, lat1: 49.4 };
-
-function drawMap(rows, land) {
-  const svg = $("#map"); svg.replaceChildren();
-  const W = 640, H = 400, pad = 10;
-  const { lon0, lon1, lat0, lat1 } = CONUS;
-  // cos(mid-latitude) keeps longitude degrees from stretching the country sideways.
-  const k = Math.cos((lat0 + lat1) / 2 * Math.PI / 180);
-  const s = Math.min((W - pad * 2) / ((lon1 - lon0) * k), (H - pad * 2) / (lat1 - lat0));
-  const ox = pad + ((W - pad * 2) - (lon1 - lon0) * k * s) / 2;
-  const oy = pad + ((H - pad * 2) - (lat1 - lat0) * s) / 2;
-  const X = lon => ox + (lon - lon0) * k * s;
-  const Y = lat => oy + (lat1 - lat) * s;
-
-  // Land first, recessive -- it orients the reader and carries no data.
-  if (land) {
-    const g = el("g");
-    land.rings.forEach(ring => {
-      const d = ring.map(([lon, lat], i) => `${i ? "L" : "M"}${X(lon).toFixed(1)} ${Y(lat).toFixed(1)}`).join("") + "Z";
-      g.appendChild(el("path", { d, fill: "var(--land)", stroke: "var(--grid)", "stroke-width": 0.5 }));
-    });
-    svg.appendChild(g);
-  }
-
-  // One encoding only. The scatter carries frequency-versus-duration; asking the map to
-  // repeat it with circle size made the reader decode two channels to learn nothing new.
-  // Here the map answers one question: where does flooding linger?
-  rows.forEach(r => {
-    const c = el("circle", {
-      class: "dot", cx: X(r.lon), cy: Y(r.lat), r: 4.5,
-      fill: band(r.hours_per_flood_day), "data-station": r.station,
-    });
-    wire(c, r); svg.appendChild(c);
-  });
+// Quartering a raw maximum gives arbitrary tick labels -- 79.3/4 printed as 0/20/40/59/79.
+// Round the step to a 1/2/2.5/5 multiple of a power of ten and extend the axis to the last
+// tick, so the top gridline sits on the frame instead of floating below it.
+function niceAxis(max, count = 4) {
+  const mag = 10 ** Math.floor(Math.log10(Math.max(max, 1) / count));
+  const step = ([1, 2, 2.5, 5, 10].find(m => m * mag >= max / count) ?? 10) * mag;
+  const top = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = 0; v <= top + step * 1e-6; v += step) ticks.push(+v.toFixed(4));
+  return { top, ticks };
 }
 
 function drawScatter(rows) {
   const svg = $("#scatter"); svg.replaceChildren();
   const W = 380, H = 330, L = 44, B = 42, T = 10, R = 10;
-  const xMax = Math.max(...rows.map(r => r.days_per_year), 1) * 1.08;
-  const yMax = Math.min(Math.max(...rows.map(r => r.hours_per_year), 1) * 1.08, SCATTER_CLIP);
+  const xa = niceAxis(Math.max(...rows.map(r => r.days_per_year), 1) * 1.08);
+  const ya = niceAxis(Math.min(Math.max(...rows.map(r => r.hours_per_year), 1) * 1.08, SCATTER_CLIP));
+  const xMax = xa.top, yMax = ya.top;
   const X = v => L + v / xMax * (W - L - R);
   const Y = v => H - B - v / yMax * (H - B - T);
 
   const g = el("g", { class: "grid" });
-  for (let i = 0; i <= 4; i++) {
-    const y = Y(yMax * i / 4);
+  for (const v of ya.ticks) {
+    const y = Y(v);
     g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y }));
     const t = el("text", { x: L - 7, y: y + 3.5, "text-anchor": "end" });
-    t.textContent = Math.round(yMax * i / 4); g.appendChild(t);
+    t.textContent = v; g.appendChild(t);
   }
-  for (let i = 0; i <= 4; i++) {
-    const x = X(xMax * i / 4);
-    const t = el("text", { x, y: H - B + 15, "text-anchor": "middle" });
-    t.textContent = Math.round(xMax * i / 4); g.appendChild(t);
+  for (const v of xa.ticks) {
+    const t = el("text", { x: X(v), y: H - B + 15, "text-anchor": "middle" });
+    t.textContent = v; g.appendChild(t);
   }
   svg.appendChild(g);
 
@@ -340,9 +589,12 @@ function drawScatter(rows) {
     });
     wire(m, r); svg.appendChild(m);
   });
+  // Bottom-right, not top-left: the ray labels terminate along the top edge and the note
+  // ran straight through "8 hrs/day". Nothing plots in the high-frequency/low-hours corner,
+  // because a station cannot flood often and briefly enough to land there.
   if (offscale.length) {
-    const t = el("text", { x: L + 2, y: T + 8, "text-anchor": "start" });
-    t.textContent = `▲ ${offscale.length} above ${yMax} hrs (river-influenced gauges)`;
+    const t = el("text", { x: W - R, y: H - B - 7, "text-anchor": "end" });
+    t.textContent = `▲ ${offscale.length} above ${yMax} hrs (river-influenced)`;
     svg.appendChild(t);
   }
 }
@@ -359,11 +611,7 @@ function drawTable(rows) {
 function wire(node, r) {
   node.addEventListener("mousemove", e => {
     const tip = $("#tip");
-    tip.innerHTML = `<b>${r.name}</b>
-      <span class="r">${fmt(r.days_per_year)} flood days/yr</span><br>
-      <span class="r">${fmt(r.hours_per_year)} hours/yr</span><br>
-      <span class="r">${fmt(r.hours_per_flood_day, 2)} hrs per flood day</span><br>
-      <span class="r">${r.usable_years} usable years${r.trend_supported ? "" : " — too few for a trend"}</span>`;
+    tip.innerHTML = tipHTML(r);
     tip.style.opacity = 1;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - 260) + "px";
     tip.style.top = (e.clientY + 16) + "px";
@@ -373,8 +621,12 @@ function wire(node, r) {
 }
 
 async function showStation(r) {
+  selected = r.station;
   document.querySelectorAll(".dot.sel").forEach(n => n.classList.remove("sel"));
   document.querySelectorAll(`[data-station="${r.station}"]`).forEach(n => n.classList.add("sel"));
+  // The map is a canvas, not DOM -- selection is a layer filter, not a CSS class.
+  if (map?.getLayer("stations-sel")) map.setFilter("stations-sel", ["==", ["get", "station"], r.station]);
+
   $("#detailPanel").hidden = false;
   $("#detailName").textContent = r.name;
   $("#detailNote").textContent = "Loading…";
@@ -437,13 +689,25 @@ function drawHistory(years) {
   });
 }
 
-// Bootstrap last. `radius` and `maxDays` are const arrows, so calling render() from
-// above their declarations hits the temporal dead zone -- which fails at run time only
-// for the charts that use them, and silently if errors are not isolated.
+// Repaint on theme flip. The map reads colours once at style-build time, so it does not
+// follow prefers-color-scheme the way the CSS-driven panels do.
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (!map) return;
+  map.setStyle(mapStyle());
+  map.once("styledata", () => {
+    map.getSource("stations")?.setData(stationsGeoJSON(stations));
+    if (selected) map.setFilter("stations-sel", ["==", ["get", "station"], selected]);
+  });
+  try { drawScatter(stations); } catch (err) { console.error(err); }
+});
+
+// Bootstrap last. Several helpers are const arrows, so calling render() from above their
+// declarations hits the temporal dead zone -- which fails at run time only for the charts
+// that use them, and silently if errors are not isolated.
 try {
   const data = await load();
   stations = data.stations.filter(s => s.lat != null && s.days_per_year != null);
-  render(await loadLand());
+  render();
 } catch (err) {
   console.error(err);
   $("#cards").innerHTML = '<p class="empty">No data yet — run the aggregation.</p>';
