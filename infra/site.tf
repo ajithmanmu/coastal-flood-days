@@ -70,6 +70,7 @@ data "aws_iam_policy_document" "bucket_for_cloudfront" {
       "${aws_s3_bucket.data.arn}/us-states.json",
       "${aws_s3_bucket.data.arn}/results/*",
       "${aws_s3_bucket.data.arn}/basemap/*",
+      "${aws_s3_bucket.data.arn}/vendor/*",
     ]
 
     principals {

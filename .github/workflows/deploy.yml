@@ -1,0 +1,80 @@
+name: deploy
+
+# Push to main publishes the page. The dataset is not touched: results/ is owned by the
+# daily Lambda and raw/ by the backfill, and the CI role cannot write either.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "deploy.sh"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+# Least privilege: `id-token` is what lets the job request an OIDC token; `contents: read`
+# is all it needs besides. No AWS keys are stored in this repository.
+permissions:
+  id-token: write
+  contents: read
+
+# A second push while one deploy is running should supersede it, not race it into the
+# same bucket. Never cancel in progress -- a half-finished asset sync would leave the
+# page referencing files that are not there yet.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://d39egagpmdjbzd.cloudfront.net
+    env:
+      CI: "true"
+      DISTRIBUTION_ID: E1WGHQRL9XD896
+      AWS_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::412602263780:role/coastal-flood-days-github-deploy
+          aws-region: us-east-1
+
+      - name: Publish
+        run: ./deploy.sh
+
+      - name: Verify the page is live and the archive is not
+        run: |
+          set -euo pipefail
+          U=https://d39egagpmdjbzd.cloudfront.net
+
+          # CloudFront serves the previous object until the invalidation lands, so retry
+          # rather than asserting immediately.
+          for i in $(seq 1 20); do
+            if curl -sf "$U/vendor/maplibre-gl.mjs" -o /dev/null; then break; fi
+            echo "waiting for edge ($i/20)"; sleep 15
+          done
+
+          echo "--- assets must be reachable ---"
+          for p in /index.html /vendor/maplibre-gl.mjs /vendor/pmtiles.js /results/map_summary.json; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$U$p")
+            echo "  $p -> $code"
+            [ "$code" = "200" ] || { echo "FAIL: $p returned $code"; exit 1; }
+          done
+
+          echo "--- range requests must still work ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-15 "$U/basemap/protomaps-20260820.pmtiles")
+          echo "  basemap range -> $code"
+          [ "$code" = "206" ] || { echo "FAIL: expected 206, got $code"; exit 1; }
+
+          # The check that matters. A wildcard in the bucket policy once made the entire
+          # 736 MB raw archive publicly downloadable through CloudFront, and every
+          # positive test still passed. Assert the negative case on every deploy.
+          echo "--- raw archive must stay private ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$U/raw/station=8518750/year=2020/data.parquet")
+          echo "  raw/ -> $code"
+          [ "$code" = "403" ] || { echo "FAIL: raw archive is reachable ($code)"; exit 1; }
