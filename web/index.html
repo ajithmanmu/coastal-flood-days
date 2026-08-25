@@ -140,10 +140,31 @@
   .sizekey { display: flex; align-items: center; gap: 7px; }
   .sizekey i { display: inline-block; border-radius: 50%; background: var(--muted); opacity: .55; }
 
+  .chartlab { font-size: 0.86rem; font-weight: 600; margin: 0 0 8px; color: var(--ink); }
+
+  .detailhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+  .detailhead #clearSel {
+    font: inherit; font-size: 0.78rem; color: var(--ink-2); cursor: pointer; flex: none;
+    background: var(--plane); border: 1px solid var(--hair); border-radius: 999px; padding: 3px 12px;
+  }
+  .detailhead #clearSel:hover { color: var(--ink); border-color: var(--axis); }
+
   table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--plane); }
+  /* The selected row has to survive the table being rebuilt, so this is driven by the same
+     .sel class the map filter and scatter dots read. */
+  tbody tr.sel { background: var(--plane); box-shadow: inset 3px 0 0 var(--s3); }
+  tbody tr.sel td:first-child { font-weight: 600; color: var(--ink); }
   th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
   th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
-  th { color: var(--muted); font-weight: 500; }
+  /* Sticky: selecting a gauge on the map scrolls this table to its row, which used to
+     leave the reader looking at five unlabelled number columns. */
+  th {
+    color: var(--muted); font-weight: 500;
+    position: sticky; top: 0; z-index: 1;
+    background: var(--surface); border-bottom: 1px solid var(--axis);
+  }
   .scroll { overflow-x: auto; max-height: 340px; overflow-y: auto; }
 
   #tip {
@@ -175,7 +196,9 @@
         <div class="regions" id="regions"></div>
       </div>
       <div>
+        <p class="chartlab">Flood days and flood hours tell different stories</p>
         <svg id="scatter" viewBox="0 0 380 330" role="img" aria-label="Frequency versus duration"></svg>
+        <p class="note" style="margin:6px 0 0">Rays are lines of constant hours per flood. A gauge sitting above a ray floods for longer each time than one below it, however often it floods.</p>
       </div>
     </div>
     <div class="legend">
@@ -199,9 +222,14 @@
   </div>
 
   <div class="panel" id="detailPanel" hidden>
-    <h2 id="detailName"></h2>
-    <p class="note" id="detailNote"></p>
-    <svg id="history" viewBox="0 0 900 240" role="img" aria-label="Station history"></svg>
+    <div class="detailhead">
+      <div>
+        <h2 id="detailName"></h2>
+        <p class="note" id="detailNote"></p>
+      </div>
+      <button id="clearSel" type="button">clear</button>
+    </div>
+    <svg id="history" viewBox="0 0 900 340" role="img" aria-label="Station history"></svg>
   </div>
 
   <div class="panel">
@@ -533,6 +561,8 @@ function render() {
     try { fn(arg); } catch (err) { console.error(fn.name, err); }
   }
 
+  $("#clearSel").addEventListener("click", clearStation);
+
   headline().then(h => {
     if (!h) return;
     $("#cards").innerHTML = cards(h);
@@ -634,9 +664,17 @@ function drawTable(rows) {
     // Short headers: "hrs per flood day" wrapped to four lines on a phone and "usable yrs"
     // truncated to "usa...". The panel note carries the full wording.
     `<thead><tr><th>station</th><th>days/yr</th><th>hrs/yr</th><th>hrs/flood ↓</th><th>years</th></tr></thead><tbody>` +
-    sorted.map(r => `<tr><td>${r.name}</td><td>${fmt(r.days_per_year)}</td><td>${fmt(r.hours_per_year)}</td>` +
+    sorted.map(r => `<tr data-station="${r.station}" tabindex="0"><td>${r.name}</td><td>${fmt(r.days_per_year)}</td><td>${fmt(r.hours_per_year)}</td>` +
       `<td>${fmt(r.hours_per_flood_day, 2)}</td><td>${r.usable_years}${r.trend_supported ? "" : " *"}</td></tr>`).join("") +
     `</tbody>`;
+
+  const byId = Object.fromEntries(rows.map(r => [r.station, r]));
+  for (const tr of $("#table").querySelectorAll("tbody tr")) {
+    const r = byId[tr.dataset.station];
+    tr.addEventListener("click", () => showStation(r));
+    tr.addEventListener("keydown", e => { if (e.key === "Enter") showStation(r); });
+  }
+  applySelection();
 }
 
 function wire(node, r) {
@@ -651,12 +689,32 @@ function wire(node, r) {
   node.addEventListener("click", () => showStation(r));
 }
 
+// One place that paints the selection everywhere. Called after any redraw as well as on
+// selection change: a theme flip rebuilds the scatter and the table from scratch, and the
+// highlight used to vanish because it only ever got applied at click time.
+function applySelection() {
+  for (const n of document.querySelectorAll(".sel")) n.classList.remove("sel");
+  if (map?.getLayer("stations-sel")) {
+    map.setFilter("stations-sel", ["==", ["get", "station"], selected ?? ""]);
+  }
+  if (!selected) return;
+  for (const n of document.querySelectorAll(`[data-station="${selected}"]`)) n.classList.add("sel");
+}
+
+function clearStation() {
+  selected = null;
+  applySelection();
+  $("#detailPanel").hidden = true;
+}
+
 async function showStation(r) {
   selected = r.station;
-  document.querySelectorAll(".dot.sel").forEach(n => n.classList.remove("sel"));
-  document.querySelectorAll(`[data-station="${r.station}"]`).forEach(n => n.classList.add("sel"));
-  // The map is a canvas, not DOM -- selection is a layer filter, not a CSS class.
-  if (map?.getLayer("stations-sel")) map.setFilter("stations-sel", ["==", ["get", "station"], r.station]);
+  applySelection();
+
+  // Bring the row into view -- the table scrolls independently and the selected station is
+  // usually outside it, so without this the linkage is invisible from the map.
+  const row = $("#table").querySelector(`tr[data-station="${selected}"]`);
+  row?.scrollIntoView({ block: "nearest" });
 
   $("#detailPanel").hidden = false;
   $("#detailName").textContent = r.name;
@@ -669,55 +727,87 @@ async function showStation(r) {
 
   const years = detail.years.filter(y => y.usable);
   const first = years[0]?.year, last = years.at(-1)?.year;
-  $("#detailNote").textContent =
-    `Flood days per year, ${first}–${last}. ${years.length} usable years; ` +
-    `${detail.years.length - years.length} excluded for incomplete observations.`;
+  const recent = years.slice(-10);
+  const avgDays = recent.reduce((a, y) => a + y.flood_days, 0) / Math.max(recent.length, 1);
+  const ratio = recent.reduce((a, y) => a + y.flood_hours, 0) /
+                Math.max(recent.reduce((a, y) => a + y.flood_days, 0), 1);
+
+  $("#detailNote").innerHTML =
+    `${first}–${last} · ${years.length} usable years · ` +
+    `${detail.years.length - years.length} excluded for incomplete observations<br>` +
+    `Last 10 years: <strong>${fmt(avgDays)}</strong> flood days per year, ` +
+    `averaging <strong>${fmt(ratio)}</strong> hours above the threshold each.`;
   drawHistory(years);
 }
 
+// Two stacked panels on a shared year axis: flood days on top, hours above threshold
+// below. Separate panels rather than a dual axis -- two series with unrelated units on one
+// pair of axes invites reading a crossover as meaning something, and the whole point of
+// this page is that the two quantities move independently.
 function drawHistory(years) {
   const svg = $("#history"); svg.replaceChildren();
   if (!years.length) return;
-  const W = 900, H = 240, L = 38, B = 30, T = 12, R = 8;
-  const yMax = Math.max(...years.map(y => y.flood_days), 1) * 1.1;
+
+  const W = 900, L = 42, R = 8, GAP = 30, PH = 130, B = 26;
   const y0 = years[0].year, y1 = years.at(-1).year;
   const X = y => L + (y - y0) / Math.max(y1 - y0, 1) * (W - L - R);
-  const Y = v => H - B - v / yMax * (H - B - T);
   const bw = Math.max(2, (W - L - R) / Math.max(years.length, 1) - 2);
 
-  const g = el("g", { class: "grid" });
-  for (let i = 0; i <= 4; i++) {
-    const y = Y(yMax * i / 4);
-    g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y }));
-    const t = el("text", { x: L - 7, y: y + 3.5, "text-anchor": "end" });
-    t.textContent = Math.round(yMax * i / 4); g.appendChild(t);
+  const panels = [
+    { key: "flood_days", label: "flood days per year", fill: "var(--s4)", top: 16, dp: 0 },
+    { key: "flood_hours", label: "hours above threshold per year", fill: "var(--s2)", top: 16 + PH + GAP, dp: 0 },
+  ];
+
+  for (const p of panels) {
+    const ax = niceAxis(Math.max(...years.map(y => y[p.key]), 1) * 1.1, 3);
+    const base = p.top + PH;
+    const Y = v => base - v / ax.top * PH;
+
+    const cap = el("text", { x: L, y: p.top - 5, "text-anchor": "start", class: "axis-title" });
+    cap.textContent = p.label; svg.appendChild(cap);
+
+    const g = el("g", { class: "grid" });
+    for (const v of ax.ticks) {
+      const y = Y(v);
+      g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y }));
+      const t = el("text", { x: L - 7, y: y + 3.5, "text-anchor": "end" });
+      t.textContent = v; g.appendChild(t);
+    }
+    svg.appendChild(g);
+
+    years.forEach(y => {
+      const v = y[p.key];
+      const bar = el("rect", {
+        x: X(y.year) - bw / 2, y: Y(v), width: bw, height: Math.max(base - Y(v), 0.8),
+        rx: Math.min(2, bw / 2), fill: p.fill,
+      });
+      // Both panels report both numbers: the comparison is the point, so hovering either
+      // one should not make you look across to the other.
+      bar.addEventListener("mousemove", e => {
+        const tip = $("#tip");
+        tip.innerHTML = `<b>${y.year}</b><span class="r">${y.flood_days} flood days<br>` +
+          `${fmt(y.flood_hours, 0)} hours above threshold<br>` +
+          `${y.flood_days ? fmt(y.flood_hours / y.flood_days, 1) + " hrs each" : "—"}</span>`;
+        tip.style.opacity = 1;
+        tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
+        tip.style.top = (e.clientY + 16) + "px";
+      });
+      bar.addEventListener("mouseleave", () => { $("#tip").style.opacity = 0; });
+      svg.appendChild(bar);
+    });
+
+    const axis = el("g", { class: "axis" });
+    axis.appendChild(el("line", { x1: L, x2: W - R, y1: base, y2: base }));
+    svg.appendChild(axis);
   }
-  svg.appendChild(g);
 
-  years.forEach(y => {
-    const h = (H - B) - Y(y.flood_days);
-    const bar = el("rect", {
-      x: X(y.year) - bw / 2, y: Y(y.flood_days), width: bw, height: Math.max(h, 0.8),
-      rx: Math.min(2, bw / 2), fill: "var(--s3)",
-    });
-    bar.addEventListener("mousemove", e => {
-      const tip = $("#tip");
-      tip.innerHTML = `<b>${y.year}</b><span class="r">${y.flood_days} flood days<br>${fmt(y.flood_hours, 0)} hours above threshold</span>`;
-      tip.style.opacity = 1;
-      tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
-      tip.style.top = (e.clientY + 16) + "px";
-    });
-    bar.addEventListener("mouseleave", () => { $("#tip").style.opacity = 0; });
-    svg.appendChild(bar);
-  });
-
-  const ax = el("g", { class: "axis" });
-  ax.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B }));
-  svg.appendChild(ax);
+  // Year labels once, under the lower panel -- the axis is shared.
+  const base = panels.at(-1).top + PH;
   [y0, y1].forEach((y, i) => {
-    const t = el("text", { x: X(y), y: H - B + 16, "text-anchor": i ? "end" : "start" });
+    const t = el("text", { x: X(y), y: base + 16, "text-anchor": i ? "end" : "start" });
     t.textContent = y; svg.appendChild(t);
   });
+  svg.setAttribute("viewBox", `0 0 ${W} ${base + B}`);
 }
 
 // Repaint on theme flip. The map reads colours once at style-build time, so it does not
@@ -727,9 +817,10 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   map.setStyle(mapStyle());
   map.once("styledata", () => {
     map.getSource("stations")?.setData(stationsGeoJSON(stations));
-    if (selected) map.setFilter("stations-sel", ["==", ["get", "station"], selected]);
+    applySelection();
   });
-  try { drawScatter(stations); } catch (err) { console.error(err); }
+  // Both redraws discard their DOM, so the highlight is re-applied rather than assumed.
+  try { drawScatter(stations); drawTable(stations); applySelection(); } catch (err) { console.error(err); }
 });
 
 // Bootstrap last. Several helpers are const arrows, so calling render() from above their
