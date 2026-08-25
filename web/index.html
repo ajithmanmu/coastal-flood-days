@@ -159,14 +159,16 @@
 </style>
 
 <div class="wrap">
-  <h1>Floods got <span id="mult">13×</span> more frequent. They didn't get longer.</h1>
-  <p class="sub">NOAA counts the <em>days</em> a coastal gauge floods. It never measures how long each flood lasts. This does — 137 gauges, every year on record.</p>
+  <h1>At The Battery, floods got <span id="mult">13×</span> more frequent. They didn't get longer.</h1>
+  <p class="sub">NOAA publishes how many <em>days</em> each gauge floods, not how long the water stays up. This measures the duration — and across the 41 longest records, it has barely moved.</p>
 
   <div class="cards" id="cards"></div>
 
   <div class="panel">
     <h2>Where floods are frequent, and where they linger</h2>
-    <p class="note">Circle size is hours underwater per year; colour is hours per flood day. Last 10 usable years.</p>
+    <!-- No "darker means longer": the ramp inverts between themes so magnitude always
+         reads as weight against the background. The legend below carries the direction. -->
+    <p class="note">Some gauges flood often and briefly; others rarely and for hours. Circle size is hours above the flood threshold per year, colour is hours per flood day. Last 10 usable years — <strong>click any gauge for its full record</strong>.</p>
     <div class="split">
       <div>
         <div id="map"></div>
@@ -184,10 +186,14 @@
         <span class="sw" style="background:var(--s5)"></span>
         <span style="margin-left:4px">under 1.8 → over 5.4</span>
       </span>
+      <!-- Diameters are 2 * 1.55 * sqrt(hours), matching radius() at zoom factor 1.0, so
+           the key is measurable rather than decorative. The old key said "5 -> 100+" while
+           the encoding actually saturates at 201 hrs; "200+" marks the clamp, where the
+           top handful of Gulf gauges all render the same size. -->
       <span class="sizekey">
-        <span>hrs underwater / yr</span>
-        <i style="width:7px;height:7px"></i><i style="width:13px;height:13px"></i><i style="width:22px;height:22px"></i>
-        <span>5 → 100+</span>
+        <span>hrs above threshold / yr</span>
+        <i style="width:10px;height:10px"></i><i style="width:22px;height:22px"></i><i style="width:44px;height:44px"></i>
+        <span>10 · 50 · 200+</span>
       </span>
     </div>
   </div>
@@ -200,14 +206,25 @@
 
   <div class="panel">
     <h2>Every station</h2>
-    <p class="note">The same figures as the map. Sorted by hours per flood day.</p>
+    <p class="note">Recent 10-year averages, sorted by hours per flood day. <em>years</em> is usable years; <em>*</em> marks records too short for a trend claim.</p>
     <div class="scroll"><table id="table"></table></div>
   </div>
 
   <p class="caveat">
     <strong>Why this exists.</strong> Across these 137 gauges a flood day means anything from
     just over an hour above the threshold to most of a day — and NOAA's published counts
-    score every one of them the same. This measures the hours instead.
+    score every one of them the same. NOAA's Inundation Analysis Tool <em>can</em> compute
+    duration, one station and a limited date range at a time. What has not existed is the
+    bulk history: duration made comparable across thousands of station-years alongside the
+    published day counts. That is what this is.
+  </p>
+
+  <p class="caveat" style="border-top:0; padding-top:0; margin-top:14px">
+    <strong>The pattern behind the headline.</strong> Flood days rose at 73 of the 86 gauges
+    with long enough records to compare their first and last decade. Over the same spans the
+    length of an individual flood barely moved — a median change of about
+    <strong>+0.01 hours per decade</strong> across the 41 longest records, with 28 of those 41
+    flat to within a quarter of their starting value. More floods, the same shape.
   </p>
 
   <p class="caveat" style="border-top:0; padding-top:0; margin-top:14px">
@@ -479,15 +496,27 @@ async function headline() {
   };
 }
 
+function quantile(sorted, q) {
+  const i = (sorted.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+
 function cards(h) {
-  const spread = stations.map(s => s.hours_per_flood_day).filter(v => v > 0);
+  // 10th-90th percentile, not min-max. The full range runs 1.1 to 22.3 hrs, but the top of
+  // it is Berwick -- a gauge on the Atchafalaya whose behaviour is river discharge as much
+  // as tide, and which the scatter already flags as not comparable. Quoting a range whose
+  // upper bound is the one station we caveat elsewhere argues against itself. Excluding
+  // river gauges by name was the obvious alternative and is wrong: "Fall River, MA" is a
+  // city on Mount Hope Bay, not a river gauge. A percentile needs no such taxonomy.
+  const spread = stations.map(s => s.hours_per_flood_day).filter(v => v > 0).sort((a, b) => a - b);
   const years = stations.reduce((a, s) => a + (s.usable_years || 0), 0);
   const rows = [
     h ? [`${Math.round(h.multiple)}×`, `more flood days at ${h.place} than in the ${h.from}s`]
       : [stations.length, "coastal gauges"],
     h ? [`${fmt(h.hrsNow)} hrs`, `how long each one lasts — ${fmt(h.hrsThen)} hrs in the ${h.from}s`]
       : ["–", "how long each one lasts"],
-    [`${fmt(Math.min(...spread))}–${fmt(Math.max(...spread), 0)} hrs`, "spread between gauges: duration is about place"],
+    [`${fmt(quantile(spread, 0.1))}–${fmt(quantile(spread, 0.9))} hrs`,
+     "how long a flood lasts at 8 in 10 gauges — duration is about place"],
     [years.toLocaleString(), "station-years computed from hourly readings"],
   ];
   return rows.map(([v, k]) => `<div class="card"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
@@ -553,7 +582,7 @@ function drawScatter(rows) {
   const xt = el("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", class: "axis-title" });
   xt.textContent = "flood days per year"; svg.appendChild(xt);
   const yt = el("text", { x: -(T + H - B) / 2, y: 13, transform: "rotate(-90)", "text-anchor": "middle", class: "axis-title" });
-  yt.textContent = "hours underwater per year"; svg.appendChild(yt);
+  yt.textContent = "hours above threshold per year"; svg.appendChild(yt);
 
   // Rays from the origin are lines of constant hours-per-flood-day, because the ratio
   // IS y/x. The fingerprint is the chart's geometry rather than a third encoding.
@@ -602,7 +631,9 @@ function drawScatter(rows) {
 function drawTable(rows) {
   const sorted = [...rows].sort((a, b) => (b.hours_per_flood_day || 0) - (a.hours_per_flood_day || 0));
   $("#table").innerHTML =
-    `<thead><tr><th>station</th><th>days/yr</th><th>hours/yr</th><th>hrs per flood day</th><th>usable yrs</th></tr></thead><tbody>` +
+    // Short headers: "hrs per flood day" wrapped to four lines on a phone and "usable yrs"
+    // truncated to "usa...". The panel note carries the full wording.
+    `<thead><tr><th>station</th><th>days/yr</th><th>hrs/yr</th><th>hrs/flood ↓</th><th>years</th></tr></thead><tbody>` +
     sorted.map(r => `<tr><td>${r.name}</td><td>${fmt(r.days_per_year)}</td><td>${fmt(r.hours_per_year)}</td>` +
       `<td>${fmt(r.hours_per_flood_day, 2)}</td><td>${r.usable_years}${r.trend_supported ? "" : " *"}</td></tr>`).join("") +
     `</tbody>`;
@@ -671,7 +702,7 @@ function drawHistory(years) {
     });
     bar.addEventListener("mousemove", e => {
       const tip = $("#tip");
-      tip.innerHTML = `<b>${y.year}</b><span class="r">${y.flood_days} flood days<br>${fmt(y.flood_hours, 0)} hours underwater</span>`;
+      tip.innerHTML = `<b>${y.year}</b><span class="r">${y.flood_days} flood days<br>${fmt(y.flood_hours, 0)} hours above threshold</span>`;
       tip.style.opacity = 1;
       tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
       tip.style.top = (e.clientY + 16) + "px";
