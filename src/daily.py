@@ -24,7 +24,9 @@ refreshed too for the first REVISION_REACH_DAYS days.
 import argparse
 import json
 import logging
+import random
 import sys
+import time
 from datetime import date, timedelta
 
 import pandas as pd
@@ -42,6 +44,71 @@ REVISION_REACH_DAYS = 90
 # The job must fail loudly if it produces implausibly little. A green run that wrote
 # nothing is the failure mode that goes unnoticed for weeks -- the same gap as MAR-886.
 MIN_STATIONS_EXPECTED = 100
+
+###############################################################################
+# Pacing
+#
+# This job makes roughly two NOAA calls per station -- a threshold and a year of
+# hourly heights -- and used to fire all ~274 as fast as the network allowed. The
+# backfill has had a brake between requests since it was written; the daily job
+# never got one, because 137 stations felt small enough not to need it.
+#
+# It isn't, when the far end is unhappy. On 2026-08-26 several runs in quick
+# succession left NOAA answering slowly enough that an invocation hit the Lambda
+# ceiling, and five stations came back with empty bodies that a single retry would
+# have recovered.
+#
+# Budget: 137 stations at 0.4s is ~55 seconds added to a run that normally takes
+# five minutes, against a 900s ceiling. Cheap insurance, and it makes us a better
+# client of a free public API we depend on entirely.
+###############################################################################
+
+SECONDS_BETWEEN_STATIONS = 0.4
+
+# Transient failures are the common case: an empty body, a timeout, a 5xx. Three
+# attempts with widening gaps clears those without hammering a struggling server.
+# A station that is genuinely gone still fails, just three times more slowly.
+MAX_ATTEMPTS = 3
+RETRY_BASE_SECONDS = 2.0
+
+# Circuit breaker, mirroring the backfill's. Retrying makes a total outage far more
+# expensive than it used to be: 137 stations each burning three attempts and six seconds
+# of backoff overruns the Lambda ceiling, and the run dies as a timeout instead of the
+# clean "refusing to publish" it should be. Today's User-Agent block was exactly this
+# shape -- every station failing for one shared reason -- and the useful response to that
+# is to stop, not to work through the list proving it 137 times.
+MAX_CONSECUTIVE_FAILURES = 8
+
+# The breaker alone is not enough, because its cost depends on how long each failure takes
+# to fail. A measured run against a struggling NOAA spent 426 seconds on twelve stations --
+# 35s each, mostly waiting -- and a slower upstream would have overrun the 900s ceiling
+# before the breaker finished counting. A wall clock does not need that estimate.
+#
+# 660s leaves roughly four minutes for aggregation and writing inside the Lambda ceiling.
+FETCH_BUDGET_SECONDS = 660
+
+# Whether to publish is a question about coverage, not about how the loop ended. A refresh
+# that reached almost every station is worth publishing even if it stopped early; one that
+# reached a handful is last week's data wearing a fresh timestamp, and publishing it would
+# report success and reset the "did not run" alarm while the pipeline is broken.
+MIN_REFRESH_FRACTION = 0.80
+
+
+def with_retry(fn, *args, attempts: int = MAX_ATTEMPTS):
+    """Call fn, retrying transient failures with exponential backoff and jitter.
+
+    Jitter matters even for a single-threaded job: without it, a retry storm across
+    concurrent invocations lands in lockstep, which is the pattern that turns a slow
+    server into an unreachable one.
+    """
+    for attempt in range(attempts):
+        try:
+            return fn(*args)
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+            delay = RETRY_BASE_SECONDS * (2 ** attempt) + random.uniform(0, 0.5)
+            time.sleep(delay)
 
 
 def years_to_refresh(today: date) -> list[int]:
@@ -83,18 +150,47 @@ def run(stations: list[str] | None = None, today: date | None = None, dry_run: b
     index = station_index()
     targets = stations or index["station"].tolist()
 
-    fresh, failed = [], []
+    started = time.monotonic()
+    fresh, failed, consecutive, attempted = [], [], 0, 0
     for n, station_id in enumerate(targets, 1):
+        if n > 1:
+            time.sleep(SECONDS_BETWEEN_STATIONS)
+
+        elapsed = time.monotonic() - started
+        if elapsed > FETCH_BUDGET_SECONDS:
+            log.error("fetch budget of %ss exhausted after %s of %s stations -- stopping so "
+                      "there is time left to publish", FETCH_BUDGET_SECONDS, n - 1, len(targets))
+            break
+
+        attempted = n
         try:
-            fresh.extend(refresh_station(station_id, years))
+            fresh.extend(with_retry(refresh_station, station_id, years))
+            consecutive = 0
         except Exception as exc:
             failed.append(station_id)
-            log.warning("%s failed: %s", station_id, str(exc)[:80])
+            consecutive += 1
+            log.warning("%s failed after %s attempts: %s", station_id, MAX_ATTEMPTS, str(exc)[:80])
+            if consecutive >= MAX_CONSECUTIVE_FAILURES:
+                log.error("%s consecutive failures -- stopping. This is one upstream problem, "
+                          "not %s separate ones.", consecutive, len(targets) - n)
+                break
         if n % 25 == 0:
-            log.info("  %s/%s stations", n, len(targets))
+            rate = n / max(time.monotonic() - started, 1e-9)
+            log.info("  %s/%s stations · %.1f/s · %s failed", n, len(targets), rate, len(failed))
+
+    refreshed = attempted - len(failed)
+    coverage = refreshed / max(len(targets), 1)
+    log.info("fetch pass: %.0fs · %s/%s stations refreshed (%.0f%%) · %s failed",
+             time.monotonic() - started, refreshed, len(targets), coverage * 100, len(failed))
 
     if not fresh:
         log.error("no rows produced -- refusing to publish")
+        return 1
+
+    if coverage < MIN_REFRESH_FRACTION:
+        log.error("only %.0f%% of stations refreshed, need %.0f%% -- refusing to publish. The "
+                  "previous run's data stays live rather than being restamped as current.",
+                  coverage * 100, MIN_REFRESH_FRACTION * 100)
         return 1
 
     updated = pd.DataFrame(fresh)
