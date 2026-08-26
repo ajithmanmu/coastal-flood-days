@@ -86,10 +86,15 @@ resource "aws_lambda_function" "daily" {
   image_uri     = "${aws_ecr_repository.daily.repository_url}:${var.image_tag}"
   architectures = ["arm64"]
 
-  # A live run over 137 stations took ~5 minutes on a laptop. The job is network-bound,
-  # so the ceiling is generous rather than tuned; more memory buys CPU it will not use,
-  # but pandas needs the headroom.
-  timeout     = 600
+  # The job is network-bound: ~274 sequential NOAA calls, two per station. A laptop run
+  # took ~5 minutes, so 600s looked generous -- until NOAA slowed us down after several
+  # runs in quick succession and an invocation hit the ceiling exactly at 600000 ms.
+  #
+  # 900 is Lambda's maximum, and the right answer for a job whose runtime is set by how
+  # fast someone else's API answers. The real protection is the alarm and the
+  # refuse-to-publish guard, not a tight timeout: a slow run that finishes is fine, and a
+  # run that produces nothing is already refused before it can overwrite anything.
+  timeout     = 900
   memory_size = 2048
 
   environment {

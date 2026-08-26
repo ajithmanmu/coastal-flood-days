@@ -176,6 +176,15 @@
   #tip b { display: block; margin-bottom: 3px; }
   #tip .r { color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .caveat { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--grid); padding-top: 14px; margin-top: 26px; }
+
+  .method { display: grid; grid-template-columns: 13rem 1fr; gap: 9px 20px; margin: 0; font-size: 0.82rem; }
+  .method dt { color: var(--ink); font-weight: 600; }
+  .method dd { color: var(--ink-2); margin: 0; }
+  .method a { color: inherit; }
+  @media (max-width: 620px) {
+    .method { grid-template-columns: 1fr; gap: 2px; }
+    .method dd { margin-bottom: 10px; }
+  }
   .empty { color: var(--muted); padding: 28px 0; text-align: center; }
 </style>
 
@@ -259,14 +268,12 @@
     flat to within a quarter of their starting value. More floods, the same shape.
   </p>
 
-  <p class="caveat" style="border-top:0; padding-top:0; margin-top:14px">
-    <strong>What these numbers are.</strong> Hours the water sat at or above NOAA's NOS minor
-    flood threshold at the gauge — <em>exposure duration</em>, not road-closure time. A tide
-    gauge measures one point in the water, not the street, and gauges systematically
-    undercount street flooding. Flood-day counts are computed independently from raw hourly
-    observations and match NOAA's published counts at 99% of station-years. Years with under
-    90% valid observations are excluded rather than counted as calm.
-  </p>
+  <div class="panel" id="methods">
+    <h2>How this was measured</h2>
+    <p class="note">Enough to check the work. Full rules and code in the
+      <a href="https://github.com/ajithmanmu/coastal-flood-days">repository</a>.</p>
+    <dl class="method"></dl>
+  </div>
 </div>
 <div id="tip"></div>
 
@@ -528,11 +535,31 @@ function cards(h) {
   return rows.map(([v, k]) => `<div class="card"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
 }
 
+// Figures come from the summary, never hardcoded. A validation percentage typed into a page
+// is the kind that stays there long after it stopped being true.
+function methods(h) {
+  const rows = [
+    ["A flood day", "One day whose highest water level reached or passed the local flood threshold. Two high tides over the line on the same day still count once."],
+    ["The threshold", "NOAA's published NOS minor flood level for that specific station, in feet above its own datum. Never invented, and never the average high tide — that is exceeded about half the days of the year by definition."],
+    ["Flood hours", "Hourly observations at or above the threshold, each standing for one hour. Good to a few percent for an annual total; it cannot tell you how long any single flood lasted."],
+    ["Day boundaries", "GMT, not local time. Established by testing against NOAA's own published counts rather than assumed — local time disagreed nine times more often."],
+    ["Excluded", h ? `Years with under 90% valid observations — ${h.station_years_excluded.toLocaleString()} of ${h.station_years_total.toLocaleString()} station-years. A year with missing data is unknown, not calm.`
+                   : "Years with under 90% valid observations. A year with missing data is unknown, not calm."],
+    ["Checked against NOAA", h?.exact_pct
+      ? `Flood-day counts are computed independently from raw observations, then compared with NOAA's published counts: <strong>${h.exact_pct}% exact</strong>, ${h.within_one_day_pct}% within one day, across ${h.checked_against_noaa.toLocaleString()} station-years.`
+      : "Flood-day counts are computed independently from raw observations and compared with NOAA's published counts."],
+    ["What this is not", "Exposure at the gauge, not impact on land. These are hours the water stood above a line in the water — not road closures, not property damage. Tide gauges systematically undercount street flooding."],
+    ["Source", 'Every observation from <a href="https://tidesandcurrents.noaa.gov/">NOAA CO-OPS</a>' + (h ? `, ${h.first_year}–${h.last_year}.` : ".")],
+  ];
+  return rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+}
+
 function render(headline) {
   // The headline figures ride along in map_summary.json, computed by aggregate.py. They
   // span every station-year, so the page cannot derive them from what it loads -- and it
   // should not: a number on screen and the number in the dataset must have one source.
   try { $("#cards").innerHTML = cards(headline); } catch (err) { console.error("cards", err); }
+  try { $(".method").innerHTML = methods(headline); } catch (err) { console.error("methods", err); }
 
   // Each chart is isolated: a single bad station should degrade one panel, not blank
   // the page. Found the hard way -- a one-station map produced a zero-width extent.

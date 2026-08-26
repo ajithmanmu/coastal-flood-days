@@ -1790,6 +1790,13 @@
   "hours_per_flood_then": 1.95,
   "hours_per_flood_now": 1.97,
   "duration_records": 41,
-  "station_years": 6848
+  "station_years": 6848,
+  "station_years_total": 7743,
+  "station_years_excluded": 895,
+  "first_year": 1920,
+  "last_year": 2026,
+  "checked_against_noaa": 6848,
+  "exact_pct": 95.75,
+  "within_one_day_pct": 99.61
  }
 }

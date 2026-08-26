@@ -173,13 +173,47 @@ def headline_stats(results: pd.DataFrame) -> dict:
         if late["flood_days"].sum() > 0:
             now.append(late["flood_hours"].sum() / late["flood_days"].sum())
 
-    return {
+    stats = {
         "gauges_more_frequent": int(rose),
         "gauges_compared": int(total),
         "hours_per_flood_then": round(float(pd.Series(then).median()), 2),
         "hours_per_flood_now": round(float(pd.Series(now).median()), 2),
         "duration_records": len(now),
         "station_years": int(len(usable)),
+        "station_years_total": int(len(results)),
+        "station_years_excluded": int(len(results) - len(usable)),
+        "first_year": int(results["year"].min()),
+        "last_year": int(results["year"].max()),
+    }
+    stats.update(agreement(usable))
+    return stats
+
+
+def agreement(usable: pd.DataFrame) -> dict:
+    """How often our independently computed flood-day counts match NOAA's published ones.
+
+    This is the number that earns the rest of the page the benefit of the doubt, so it is
+    published rather than quoted from a notebook run months ago -- a hardcoded accuracy
+    figure is exactly the sort that stays on a page long after it stopped being true.
+
+    Missing comparison data is not fatal: the figures are simply omitted and the page drops
+    that line rather than showing a stale one.
+    """
+    try:
+        noaa = results_read_parquet("noaa_counts.parquet")
+    except Exception:
+        return {}
+
+    noaa = noaa.assign(year=noaa["year"].astype(int))
+    merged = usable.merge(noaa, on=["station", "year"], how="inner")
+    if merged.empty:
+        return {}
+
+    diff = (merged["flood_days"] - merged["noaa_days"]).abs()
+    return {
+        "checked_against_noaa": int(len(merged)),
+        "exact_pct": round(float((diff == 0).mean()) * 100, 2),
+        "within_one_day_pct": round(float((diff <= 1).mean()) * 100, 2),
     }
 
 
