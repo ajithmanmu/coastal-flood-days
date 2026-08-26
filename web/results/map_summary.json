@@ -1783,5 +1783,13 @@
    "lat": 17.97,
    "lon": -67.046
   }
- ]
+ ],
+ "headline": {
+  "gauges_more_frequent": 73,
+  "gauges_compared": 86,
+  "hours_per_flood_then": 1.95,
+  "hours_per_flood_now": 1.97,
+  "duration_records": 41,
+  "station_years": 6848
+ }
 }

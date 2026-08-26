@@ -24,6 +24,37 @@ import requests
 
 MDAPI = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations"
 
+# NOAA began rejecting mdapi requests carrying a default client User-Agent on 2026-08-26 --
+# `python-requests/x.y` returns 403, and so does a plain descriptive string. The daily job
+# had been running for weeks and started failing between two runs on the same day. Only
+# mdapi filters; datagetter and dpapi accept anything.
+#
+# This is the conventional non-browser agent form -- the same shape Googlebot uses --
+# and it identifies the project rather than pretending to be a browser. The `Mozilla/5.0`
+# token is a historical compatibility artifact that essentially every HTTP client carries;
+# what matters for identification is the product name and the URL after it.
+USER_AGENT = (
+    "Mozilla/5.0 (compatible; coastal-flood-days/1.0; "
+    "+https://github.com/ajithmanmu/coastal-flood-days)"
+)
+
+# One session for the process: connection reuse across 137 stations, and one place that
+# decides what we send. Anything calling NOAA through our own code goes through this.
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": USER_AGENT})
+
+# ...but not everything calling NOAA is our own code. noaa_coops builds its requests with
+# the module-level `requests` and sets no headers (station.py:145 fetches station metadata
+# the moment a Station is constructed), so it kept sending the default agent and getting a
+# 403 that surfaced as KeyError: 'stations' -- the block is invisible because the library
+# indexes the error body as though it were data.
+#
+# requests composes its default header from this function at Session creation, so replacing
+# it covers every client in the process, including dependencies we do not control. It is a
+# deliberate process-wide default rather than a per-call override, which is the only level
+# that reaches inside a third-party library.
+requests.utils.default_user_agent = lambda *_a, **_kw: USER_AGENT
+
 # Rule 4: one timezone throughout, never local daylight time.
 #
 # GMT, not local standard time -- established by measurement, not preference. Counting
@@ -77,7 +108,7 @@ def fetch_threshold(station_id: str, level: str = "nos_minor") -> float:
     office. NOAA documents nos_minor as the one used for historical flood-day counts,
     so it is the default here. They disagree -- at The Battery, 10.19 vs 10.49 ft.
     """
-    response = requests.get(f"{MDAPI}/{station_id}/floodlevels.json", timeout=30)
+    response = SESSION.get(f"{MDAPI}/{station_id}/floodlevels.json", timeout=30)
     response.raise_for_status()
     return float(response.json()[level])
 

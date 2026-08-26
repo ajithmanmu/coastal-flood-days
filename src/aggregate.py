@@ -15,9 +15,8 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import requests
 
-from flood_days import fetch_threshold, summarise_year
+from flood_days import SESSION, fetch_threshold, summarise_year
 from storage import (cached_years, load_year, results_exists, results_read_parquet,
                      results_write_parquet, results_write_text)
 
@@ -39,7 +38,7 @@ def station_index(refresh: bool = False) -> pd.DataFrame:
     if results_exists("station_index.parquet") and not refresh:
         return results_read_parquet("station_index.parquet")
 
-    rows = requests.get(HTF_ANNUAL, timeout=60).json()["AnnualFloodCount"]
+    rows = SESSION.get(HTF_ANNUAL, timeout=60).json()["AnnualFloodCount"]
     frame = pd.DataFrame(rows)
     index = (
         frame.groupby("stnId")
@@ -134,6 +133,56 @@ def summarise_stations(results: pd.DataFrame) -> pd.DataFrame:
     return per_station.join(meta).reset_index().round(3)
 
 
+def headline_stats(results: pd.DataFrame) -> dict:
+    """The two figures the page leads with, computed across every long record.
+
+    Both compare a station's first decade of record against its last, so each gauge is its
+    own control -- the set of reporting stations changes enormously over a century, and a
+    cross-sectional average would track that churn instead of the climate.
+
+    Frequency and duration use different populations, deliberately. Any gauge with a long
+    enough record can be asked whether it floods more often. Only a gauge that actually
+    flooded can be asked how long its floods lasted, so the duration figure is restricted
+    to records with at least one flood day -- a necessity, not a filter.
+    """
+    usable = results[results["usable"]]
+    counts = usable.groupby("station")["year"].count()
+    long_records = counts[counts >= MIN_YEARS_FOR_TREND].index
+
+    def ends(frame):
+        """First and last decade of one station's record."""
+        first, last = frame["year"].min(), frame["year"].max()
+        return frame[frame["year"] <= first + 9], frame[frame["year"] >= last - 9]
+
+    rose = total = 0
+    for _, block in usable[usable["station"].isin(long_records)].groupby("station"):
+        early, late = ends(block)
+        total += 1
+        rose += late["flood_days"].mean() > early["flood_days"].mean()
+
+    # Ratios from decade totals, never a mean of per-year ratios: one quiet year with a
+    # single short flood would otherwise dominate the station's number.
+    flooded = usable[usable["flood_days"] > 0]
+    then, now = [], []
+    for _, block in flooded[flooded["station"].isin(long_records)].groupby("station"):
+        if block["year"].nunique() < MIN_YEARS_FOR_TREND:
+            continue
+        early, late = ends(block)
+        if early["flood_days"].sum() > 0:
+            then.append(early["flood_hours"].sum() / early["flood_days"].sum())
+        if late["flood_days"].sum() > 0:
+            now.append(late["flood_hours"].sum() / late["flood_days"].sum())
+
+    return {
+        "gauges_more_frequent": int(rose),
+        "gauges_compared": int(total),
+        "hours_per_flood_then": round(float(pd.Series(then).median()), 2),
+        "hours_per_flood_now": round(float(pd.Series(now).median()), 2),
+        "duration_records": len(now),
+        "station_years": int(len(usable)),
+    }
+
+
 def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
     """Three artifacts, sized for three different jobs.
 
@@ -149,6 +198,7 @@ def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
             {
                 "generated": pd.Timestamp.utcnow().isoformat(),
                 "note": "hours above NOS minor threshold at the gauge; not road-closure time",
+                "headline": headline_stats(results),
                 "stations": json.loads(summary.to_json(orient="records")),
             },
             indent=1,

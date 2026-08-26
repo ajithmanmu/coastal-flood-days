@@ -180,8 +180,8 @@
 </style>
 
 <div class="wrap">
-  <h1>At The Battery, floods got <span id="mult">13×</span> more frequent. They didn't get longer.</h1>
-  <p class="sub">NOAA publishes how many <em>days</em> each gauge floods, not how long the water stays up. This measures the duration — and across the 41 longest records, it has barely moved.</p>
+  <h1>Coastal floods come far more often than they used to. They still last about two hours.</h1>
+  <p class="sub">Tide gauges along the US coast record when the sea rises above the local flood line. NOAA publishes how many <em>days</em> that happens — not how long the water stays up. This measures that, at 137 gauges across every year on record.</p>
 
   <div class="cards" id="cards"></div>
 
@@ -219,6 +219,10 @@
         <span>10 · 50 · 200+</span>
       </span>
     </div>
+    <p class="note" style="margin:10px 0 0">
+      Every mark is a gauge. Nothing here is interpolated between them: a tide gauge measures
+      one point on a shoreline, and the coast in between was not measured.
+    </p>
   </div>
 
   <div class="panel" id="detailPanel" hidden>
@@ -452,6 +456,8 @@ function drawMap(rows) {
   });
   new ResizeObserver(() => map.resize()).observe($("#map"));
 
+  map.on("click", "stations", e => showStation(e.features[0].properties));
+
   const tip = $("#tip");
   map.on("mousemove", "stations", e => {
     map.getCanvas().style.cursor = "pointer";
@@ -465,8 +471,6 @@ function drawMap(rows) {
     map.getCanvas().style.cursor = "";
     tip.style.opacity = 0;
   });
-  map.on("click", "stations", e => showStation(e.features[0].properties));
-
   const box = $("#regions");
   box.innerHTML = "";
   for (const [name, b] of Object.entries(VIEWS)) {
@@ -485,50 +489,15 @@ function tipHTML(r) {
     <span class="r">${r.usable_years} usable years${r.trend_supported === true || r.trend_supported === "true" ? "" : " — too few for a trend"}</span>`;
 }
 
-// The Battery: the longest continuous record in the set (1921-2025) and the station the
-// headline claim rests on. Its full series is a separate 8 KB file.
-const REF_STATION = "8518750";
-
-// Decades with fewer usable years than this are not compared. The Battery's record opens
-// in 1921 with three usable years, all of them zero flood days -- taking that as the
-// baseline makes the frequency multiple infinite instead of the real 13x from the 1930s.
-const MIN_YEARS_PER_DECADE = 5;
-
-function byDecade(years) {
-  const acc = {};
-  for (const y of years) {
-    const d = Math.floor(y.year / 10) * 10;
-    (acc[d] ??= { days: 0, hours: 0, n: 0 });
-    acc[d].days += y.flood_days;
-    acc[d].hours += y.flood_hours;
-    acc[d].n++;
-  }
-  return acc;
-}
-
-// Ratios come from decade totals, not from a mean of per-year ratios: one quiet year with
-// a single short flood would otherwise dominate the number.
-async function headline() {
-  const d = await (await fetch(`${DATA}/stations/${REF_STATION}.json`)).json();
-  const acc = byDecade(d.years.filter(y => y.usable));
-  const decs = Object.keys(acc).map(Number).sort((a, b) => a - b)
-    .filter(k => acc[k].n >= MIN_YEARS_PER_DECADE && acc[k].days > 0);
-  if (decs.length < 2) return null;
-  const a = acc[decs[0]], b = acc[decs.at(-1)];
-  return {
-    place: d.name.split(",")[0],
-    from: decs[0],
-    multiple: (b.days / b.n) / (a.days / a.n),
-    hrsNow: b.hours / b.days,
-    hrsThen: a.hours / a.days,
-  };
-}
-
 function quantile(sorted, q) {
   const i = (sorted.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
 }
 
+// Every card is a whole-dataset figure. An earlier version led with one gauge's 13x rise,
+// which was accurate but opaque: "The Battery" means nothing to a reader who does not
+// already know it is a tide gauge at the southern tip of Manhattan. The general numbers
+// turned out to be the stronger claim anyway.
 function cards(h) {
   // 10th-90th percentile, not min-max. The full range runs 1.1 to 22.3 hrs, but the top of
   // it is Berwick -- a gauge on the Atchafalaya whose behaviour is river discharge as much
@@ -538,22 +507,32 @@ function cards(h) {
   // city on Mount Hope Bay, not a river gauge. A percentile needs no such taxonomy.
   const spread = stations.map(s => s.hours_per_flood_day).filter(v => v > 0).sort((a, b) => a - b);
   const years = stations.reduce((a, s) => a + (s.usable_years || 0), 0);
-  const rows = [
-    h ? [`${Math.round(h.multiple)}×`, `more flood days at ${h.place} than in the ${h.from}s`]
-      : [stations.length, "coastal gauges"],
-    h ? [`${fmt(h.hrsNow)} hrs`, `how long each one lasts — ${fmt(h.hrsThen)} hrs in the ${h.from}s`]
-      : ["–", "how long each one lasts"],
-    [`${fmt(quantile(spread, 0.1))}–${fmt(quantile(spread, 0.9))} hrs`,
-     "how long a flood lasts at 8 in 10 gauges — duration is about place"],
-    [years.toLocaleString(), "station-years computed from hourly readings"],
+
+  // The first two cards need whole-history figures the page never loads, so they come from
+  // the summary. If that block is missing -- an older aggregate.py wrote the file, which is
+  // exactly what a stale Lambda image does -- fall back to figures derivable from the
+  // stations list rather than rendering "undefined" or no cards at all.
+  const rows = h ? [
+    [`${h.gauges_more_frequent} of ${h.gauges_compared}`, "gauges with a long record now flood more often than when they opened"],
+    [`${h.hours_per_flood_then} → ${h.hours_per_flood_now} hrs`, "how long a typical flood lasted then, and now"],
+  ] : [
+    [stations.length, "coastal gauges, every usable year on record"],
+    [`${fmt(quantile(spread, 0.5))} hrs`, "how long a typical flood lasts"],
   ];
+
+  rows.push(
+    [`${fmt(quantile(spread, 0.1))}–${fmt(quantile(spread, 0.9))} hrs`,
+     "how long a flood lasts at 8 in 10 gauges — length depends on the coast"],
+    [(h?.station_years ?? years).toLocaleString(), "station-years computed from hourly sea-level readings"],
+  );
   return rows.map(([v, k]) => `<div class="card"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
 }
 
-function render() {
-  // Cards paint immediately from the summary, then upgrade once the reference station's
-  // series lands. The map must not wait on an 8 KB file it does not need.
-  $("#cards").innerHTML = cards(null);
+function render(headline) {
+  // The headline figures ride along in map_summary.json, computed by aggregate.py. They
+  // span every station-year, so the page cannot derive them from what it loads -- and it
+  // should not: a number on screen and the number in the dataset must have one source.
+  try { $("#cards").innerHTML = cards(headline); } catch (err) { console.error("cards", err); }
 
   // Each chart is isolated: a single bad station should degrade one panel, not blank
   // the page. Found the hard way -- a one-station map produced a zero-width extent.
@@ -562,13 +541,6 @@ function render() {
   }
 
   $("#clearSel").addEventListener("click", clearStation);
-
-  headline().then(h => {
-    if (!h) return;
-    $("#cards").innerHTML = cards(h);
-    // Keep the headline and the card from drifting apart -- both come from one number.
-    $("#mult").textContent = `${Math.round(h.multiple)}×`;
-  }).catch(err => console.error("headline", err));
 }
 
 // Quartering a raw maximum gives arbitrary tick labels -- 79.3/4 printed as 0/20/40/59/79.
@@ -711,10 +683,17 @@ async function showStation(r) {
   selected = r.station;
   applySelection();
 
-  // Bring the row into view -- the table scrolls independently and the selected station is
-  // usually outside it, so without this the linkage is invisible from the map.
+  // Scroll the table's OWN container and nothing else. scrollIntoView() walks every
+  // scrollable ancestor up to the document, so clicking a gauge on the map yanked the whole
+  // page down to the table and took the map off screen -- selecting something should never
+  // move what you are looking at.
   const row = $("#table").querySelector(`tr[data-station="${selected}"]`);
-  row?.scrollIntoView({ block: "nearest" });
+  const box = row?.closest(".scroll");
+  if (row && box) {
+    const offset = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    const hidden = offset < 0 || offset + row.offsetHeight > box.clientHeight;
+    if (hidden) box.scrollTop += offset - (box.clientHeight - row.offsetHeight) / 2;
+  }
 
   $("#detailPanel").hidden = false;
   $("#detailName").textContent = r.name;
@@ -829,7 +808,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
 try {
   const data = await load();
   stations = data.stations.filter(s => s.lat != null && s.days_per_year != null);
-  render();
+  render(data.headline);
 } catch (err) {
   console.error(err);
   $("#cards").innerHTML = '<p class="empty">No data yet — run the aggregation.</p>';
