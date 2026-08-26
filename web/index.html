@@ -543,13 +543,19 @@ function methods(h) {
     ["The threshold", "NOAA's published NOS minor flood level for that specific station, in feet above its own datum. Never invented, and never the average high tide — that is exceeded about half the days of the year by definition."],
     ["Flood hours", "Hourly observations at or above the threshold, each standing for one hour. Good to a few percent for an annual total; it cannot tell you how long any single flood lasted."],
     ["Day boundaries", "GMT, not local time. Established by testing against NOAA's own published counts rather than assumed — local time disagreed nine times more often."],
-    ["Excluded", h ? `Years with under 90% valid observations — ${h.station_years_excluded.toLocaleString()} of ${h.station_years_total.toLocaleString()} station-years. A year with missing data is unknown, not calm.`
-                   : "Years with under 90% valid observations. A year with missing data is unknown, not calm."],
-    ["Checked against NOAA", h?.exact_pct
+    // Guard each field, not the block. A summary written by an older aggregate.py still
+    // has a `headline` object -- just a shorter one -- so testing that the object exists
+    // says nothing about the field being read. That is the actual stale-pipeline shape,
+    // and testing the object instead of the field threw on the live site.
+    ["Excluded", h?.station_years_excluded != null
+      ? `Years with under 90% valid observations — ${h.station_years_excluded.toLocaleString()} of ${h.station_years_total.toLocaleString()} station-years. A year with missing data is unknown, not calm.`
+      : "Years with under 90% valid observations. A year with missing data is unknown, not calm."],
+    ["Checked against NOAA", h?.exact_pct != null
       ? `Flood-day counts are computed independently from raw observations, then compared with NOAA's published counts: <strong>${h.exact_pct}% exact</strong>, ${h.within_one_day_pct}% within one day, across ${h.checked_against_noaa.toLocaleString()} station-years.`
       : "Flood-day counts are computed independently from raw observations and compared with NOAA's published counts."],
     ["What this is not", "Exposure at the gauge, not impact on land. These are hours the water stood above a line in the water — not road closures, not property damage. Tide gauges systematically undercount street flooding."],
-    ["Source", 'Every observation from <a href="https://tidesandcurrents.noaa.gov/">NOAA CO-OPS</a>' + (h ? `, ${h.first_year}–${h.last_year}.` : ".")],
+    ["Source", 'Every observation from <a href="https://tidesandcurrents.noaa.gov/">NOAA CO-OPS</a>' +
+      (h?.first_year != null ? `, ${h.first_year}–${h.last_year}.` : ".")],
   ];
   return rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
 }
