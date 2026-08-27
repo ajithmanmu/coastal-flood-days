@@ -1,9 +1,84 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coastal Flood Days — how long US coastal floods actually last</title>
+<meta name="description" content="NOAA publishes how many days each US coastal gauge floods, not how long the water stays up. Measured across 137 gauges and 6,848 station-years: floods come far more often than they used to, and still last about two hours.">
 <!-- The generated *.cloudfront.net hostname still serves this same page, so without a
      canonical the two split whatever ranking either would have earned. -->
 <link rel="canonical" href="https://floodhours.ajithmanmadhan.com/">
+
+<!-- Link previews. Shared without these, the URL renders as bare text on LinkedIn and in
+     Slack -- which is the channel that will actually carry this, so it is worth more than
+     any amount of search tuning. og:image must be an absolute URL; relative paths are
+     silently ignored by every scraper. -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://floodhours.ajithmanmadhan.com/">
+<meta property="og:title" content="Coastal floods come far more often. They don't last longer.">
+<meta property="og:description" content="NOAA counts the days a coastal gauge floods, not how long the water stays up. 137 US tide gauges, 6,848 station-years, measured from raw hourly observations.">
+<meta property="og:image" content="https://floodhours.ajithmanmadhan.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Coastal floods come far more often. They don't last longer. 73 of 86 gauges flooding more often; typical flood 1.95 to 1.97 hours; 6,848 station-years computed.">
+<meta property="og:site_name" content="Coastal Flood Days">
+<meta name="twitter:card" content="summary_large_image">
+
+<!-- schema.org/Dataset. This is what Google Dataset Search indexes, and it is a real fit
+     here rather than markup for its own sake: there is a downloadable Parquet file, a
+     licence, a named publisher, a spatial extent and a temporal range. The distribution
+     URLs must point at something actually downloadable, so they name the published
+     artifacts rather than the page. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org/",
+  "@type": "Dataset",
+  "name": "Coastal Flood Days: flood duration at US tide gauges",
+  "alternateName": "Flood Hours",
+  "description": "How long coastal floods last, not just how often they happen. NOAA publishes annual counts of high-tide-flood days for US tide gauges but not the duration of those floods. This dataset computes, for every station-year on record, the number of flood days and the number of hours the water sat at or above each station's NOAA NOS minor flood threshold, from raw hourly water-level observations. 137 gauges, 7,743 station-years (6,848 meeting a 90% completeness filter), 1920-2026. Flood-day counts agree with NOAA's own published counts at 95.75% exactly and 99.61% within one day.",
+  "url": "https://floodhours.ajithmanmadhan.com/",
+  "sameAs": "https://github.com/ajithmanmu/coastal-flood-days",
+  "keywords": [
+    "coastal flooding", "high tide flooding", "nuisance flooding", "flood duration",
+    "tide gauge", "sea level", "NOAA CO-OPS", "water level", "United States"
+  ],
+  "license": "https://opendatacommons.org/licenses/odbl/1-0/",
+  "isAccessibleForFree": true,
+  "creator": {
+    "@type": "Person",
+    "name": "Ajith Manmadhan",
+    "url": "https://portfolio.ajithmanmadhan.com"
+  },
+  "temporalCoverage": "1920/2026",
+  "spatialCoverage": {
+    "@type": "Place",
+    "name": "United States coastline, including Hawaii, Puerto Rico, the US Virgin Islands, Guam, American Samoa and the US Pacific islands"
+  },
+  "variableMeasured": [
+    { "@type": "PropertyValue", "name": "flood_days", "description": "Days in the year whose maximum water level reached or exceeded the station's NOAA NOS minor flood threshold, on GMT day boundaries" },
+    { "@type": "PropertyValue", "name": "flood_hours", "description": "Hourly observations in the year at or above that threshold, each standing for one hour", "unitText": "hours" },
+    { "@type": "PropertyValue", "name": "hours_per_flood_day", "description": "Flood hours divided by flood days: how long a flood typically lasts at that station", "unitText": "hours" },
+    { "@type": "PropertyValue", "name": "completeness", "description": "Fraction of the year's expected hourly observations actually present; below 0.90 the station-year is excluded rather than counted as flood-free" }
+  ],
+  "distribution": [
+    {
+      "@type": "DataDownload",
+      "name": "Full dataset, every station-year",
+      "encodingFormat": "application/vnd.apache.parquet",
+      "contentUrl": "https://floodhours.ajithmanmadhan.com/results/flood_days.parquet"
+    },
+    {
+      "@type": "DataDownload",
+      "name": "Per-station summary",
+      "encodingFormat": "application/json",
+      "contentUrl": "https://floodhours.ajithmanmadhan.com/results/map_summary.json"
+    }
+  ],
+  "isBasedOn": {
+    "@type": "Dataset",
+    "name": "NOAA CO-OPS water level observations",
+    "url": "https://tidesandcurrents.noaa.gov/"
+  }
+}
+</script>
+
 <link rel="stylesheet" href="./vendor/maplibre-gl.css">
 <style>
   :root {
@@ -288,6 +363,46 @@
 // constructor for the whole module and turn any `new Map()` lookup table into a map widget.
 import { Map as MapLibreMap, NavigationControl, ScaleControl, addProtocol } from "./vendor/maplibre-gl.mjs";
 
+// Analytics. Umami is cookieless, so there is no consent banner and nothing to store; it
+// is also the one third-party thing on the page, which is why every call goes through this
+// wrapper. If the script is blocked -- and a meaningful share of readers block trackers --
+// `umami` is simply undefined, and the page must not notice.
+const track = (event, data) => {
+  try { window.umami?.track(event, data); } catch { /* never break the page for a metric */ }
+};
+
+// Fires once per event name per visit. Without this, "reached the map" would count every
+// scroll past it and the numbers would measure scrolling rather than reading.
+const seen = new Set();
+const trackOnce = (event, data) => {
+  if (seen.has(event)) return;
+  seen.add(event);
+  track(event, data);
+};
+
+// Which sections a reader actually reached. 55% visible for a third of a second, so a fast
+// scroll to the bottom does not register as having read everything on the way.
+function trackSections() {
+  const targets = [["map", "#map"], ["scatter", "#scatter"], ["table", "#table"], ["methods", "#methods"]];
+  const observer = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const name = e.target.dataset.section;
+      setTimeout(() => {
+        const [still] = observer.takeRecords().filter(r => r.target === e.target && !r.isIntersecting);
+        if (!still) trackOnce("section-view", { section: name });
+      }, 350);
+    }
+  }, { threshold: 0.55 });
+
+  for (const [name, sel] of targets) {
+    const node = document.querySelector(sel);
+    if (!node) continue;
+    node.dataset.section = name;
+    observer.observe(node);
+  }
+}
+
 const $ = s => document.querySelector(s);
 const NS = "http://www.w3.org/2000/svg";
 const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
@@ -466,7 +581,11 @@ function drawMap(rows) {
   });
   new ResizeObserver(() => map.resize()).observe($("#map"));
 
-  map.on("click", "stations", e => showStation(e.features[0].properties));
+  // Fires on the first pan or zoom only. `movestart` also fires for programmatic moves, so
+  // this is filtered to gestures the reader actually made.
+  map.on("movestart", e => { if (e.originalEvent) trackOnce("map-interact"); });
+
+  map.on("click", "stations", e => showStation(e.features[0].properties, "map"));
 
   const tip = $("#tip");
   map.on("mousemove", "stations", e => {
@@ -486,7 +605,10 @@ function drawMap(rows) {
   for (const [name, b] of Object.entries(VIEWS)) {
     const btn = document.createElement("button");
     btn.textContent = name;
-    btn.addEventListener("click", () => map.fitBounds(b, { padding: 24, duration: 700 }));
+    btn.addEventListener("click", () => {
+      track("region", { region: name });
+      map.fitBounds(b, { padding: 24, duration: 700 });
+    });
     box.appendChild(btn);
   }
 }
@@ -577,6 +699,7 @@ function render(headline) {
   }
 
   $("#clearSel").addEventListener("click", clearStation);
+  try { trackSections(); } catch (err) { console.error("sections", err); }
 }
 
 // Quartering a raw maximum gives arbitrary tick labels -- 79.3/4 printed as 0/20/40/59/79.
@@ -679,8 +802,8 @@ function drawTable(rows) {
   const byId = Object.fromEntries(rows.map(r => [r.station, r]));
   for (const tr of $("#table").querySelectorAll("tbody tr")) {
     const r = byId[tr.dataset.station];
-    tr.addEventListener("click", () => showStation(r));
-    tr.addEventListener("keydown", e => { if (e.key === "Enter") showStation(r); });
+    tr.addEventListener("click", () => showStation(r, "table"));
+    tr.addEventListener("keydown", e => { if (e.key === "Enter") showStation(r, "table"); });
   }
   applySelection();
 }
@@ -694,7 +817,7 @@ function wire(node, r) {
     tip.style.top = (e.clientY + 16) + "px";
   });
   node.addEventListener("mouseleave", () => { $("#tip").style.opacity = 0; });
-  node.addEventListener("click", () => showStation(r));
+  node.addEventListener("click", () => showStation(r, "scatter"));
 }
 
 // One place that paints the selection everywhere. Called after any redraw as well as on
@@ -715,7 +838,8 @@ function clearStation() {
   $("#detailPanel").hidden = true;
 }
 
-async function showStation(r) {
+async function showStation(r, source = "unknown") {
+  track("station-select", { source, station: r.station });
   selected = r.station;
   applySelection();
 

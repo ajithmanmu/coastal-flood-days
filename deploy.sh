@@ -34,6 +34,13 @@ aws s3 sync web/vendor "s3://$BUCKET/vendor" \
   --exclude "*" --include "*.pbf" --content-type "application/x-protobuf" \
   "${PROFILE_ARG[@]}" --region "$REGION"
 
+# The link-preview image. Scrapers cache aggressively and some never re-fetch, so this is
+# given a long TTL and is expected to change only when the headline figures do.
+aws s3 cp web/og.png "s3://$BUCKET/og.png" \
+  --content-type "image/png" \
+  --cache-control "public, max-age=86400" \
+  "${PROFILE_ARG[@]}" --region "$REGION"
+
 # The page itself: short TTL so a deploy is visible without waiting on the edge.
 aws s3 cp web/index.html "s3://$BUCKET/index.html" \
   --content-type "text/html; charset=utf-8" \
@@ -44,7 +51,7 @@ aws s3 cp web/index.html "s3://$BUCKET/index.html" \
 # carries its own one-hour Cache-Control, and basemap/ is content-addressed by filename --
 # invalidating either here would just cost money.
 aws cloudfront create-invalidation --distribution-id "$DIST" \
-  --paths "/index.html" "/vendor/*" \
+  --paths "/index.html" "/og.png" "/vendor/*" \
   "${PROFILE_ARG[@]}" --region "$REGION" --query 'Invalidation.Status' --output text
 
 echo "deployed: https://floodhours.ajithmanmadhan.com"

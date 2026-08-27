@@ -103,6 +103,7 @@ data "aws_iam_policy_document" "github_deploy" {
     actions = ["s3:PutObject", "s3:GetObject"]
     resources = [
       "${aws_s3_bucket.data.arn}/index.html",
+      "${aws_s3_bucket.data.arn}/og.png",
       "${aws_s3_bucket.data.arn}/vendor/*",
     ]
   }

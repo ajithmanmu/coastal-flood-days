@@ -80,6 +80,7 @@ data "aws_iam_policy_document" "bucket_for_cloudfront" {
     actions = ["s3:GetObject"]
     resources = [
       "${aws_s3_bucket.data.arn}/index.html",
+      "${aws_s3_bucket.data.arn}/og.png",
       "${aws_s3_bucket.data.arn}/results/*",
       "${aws_s3_bucket.data.arn}/basemap/*",
       "${aws_s3_bucket.data.arn}/vendor/*",
