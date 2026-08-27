@@ -79,6 +79,16 @@
 }
 </script>
 
+<!-- Umami: cookieless, so nothing to consent to and nothing stored on the reader's machine.
+     The only third-party request the page makes, and it is deferred and non-blocking -- if
+     it is blocked, `window.umami` is undefined and every call site no-ops.
+
+     data-domains pins collection to the production hostname, so local development and the
+     old *.cloudfront.net name do not show up as real traffic. -->
+<script defer src="https://cloud.umami.is/script.js"
+        data-website-id="b38578f4-b971-466c-a80e-e0dea29fff0e"
+        data-domains="floodhours.ajithmanmadhan.com"></script>
+
 <link rel="stylesheet" href="./vendor/maplibre-gl.css">
 <style>
   :root {
@@ -323,7 +333,7 @@
     <svg id="history" viewBox="0 0 900 340" role="img" aria-label="Station history"></svg>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="stations-panel">
     <h2>Every station</h2>
     <p class="note">Recent 10-year averages, sorted by hours per flood day. <em>years</em> is usable years; <em>*</em> marks records too short for a trend claim.</p>
     <div class="scroll"><table id="table"></table></div>
@@ -371,29 +381,53 @@ const track = (event, data) => {
   try { window.umami?.track(event, data); } catch { /* never break the page for a metric */ }
 };
 
-// Fires once per event name per visit. Without this, "reached the map" would count every
-// scroll past it and the numbers would measure scrolling rather than reading.
+// Fires once per KEY per visit, not once per event name. Keying on the name alone meant the
+// first section-view -- the map, on load -- suppressed every other section for the rest of
+// the visit, so exactly one section would ever have been recorded.
 const seen = new Set();
-const trackOnce = (event, data) => {
-  if (seen.has(event)) return;
-  seen.add(event);
+const trackOnce = (key, event, data) => {
+  if (seen.has(key)) return;
+  seen.add(key);
   track(event, data);
 };
 
-// Which sections a reader actually reached. 55% visible for a third of a second, so a fast
-// scroll to the bottom does not register as having read everything on the way.
+const DWELL_MS = 400;
+
+// Which sections a reader actually reached.
+//
+// Judged by how much of the SCREEN the section fills, not by what fraction of the section
+// is visible. A fixed ratio cannot work here: the table is ~3700px tall in a ~1000px
+// window, so its intersection ratio tops out around 0.27 and a 0.55 threshold would never
+// fire for it. Screen-share is the right measure and holds for any element size.
 function trackSections() {
-  const targets = [["map", "#map"], ["scatter", "#scatter"], ["table", "#table"], ["methods", "#methods"]];
+  // The table panel, not the <table> itself. The table lives inside a container capped at
+  // 340px, and IntersectionObserver clips by ancestors -- so the element's visible height
+  // could never exceed 340px while the rule below asked for 350. It failed by ten pixels
+  // and that section was silently untrackable.
+  const targets = [["map", "#map"], ["scatter", "#scatter"], ["table", "#stations-panel"], ["methods", "#methods"]];
+  const timers = new Map();
+
   const observer = new IntersectionObserver(entries => {
     for (const e of entries) {
-      if (!e.isIntersecting) continue;
       const name = e.target.dataset.section;
-      setTimeout(() => {
-        const [still] = observer.takeRecords().filter(r => r.target === e.target && !r.isIntersecting);
-        if (!still) trackOnce("section-view", { section: name });
-      }, 350);
+      const shown = e.intersectionRect.height;
+      const enough = e.isIntersecting &&
+        shown >= Math.min(e.boundingClientRect.height * 0.6, innerHeight * 0.35);
+
+      // Must stay on screen to count -- a flick to the bottom of the page should not
+      // register as having read everything it passed.
+      if (!enough) {
+        clearTimeout(timers.get(name));
+        timers.delete(name);
+        continue;
+      }
+      if (timers.has(name)) continue;
+      timers.set(name, setTimeout(() => {
+        trackOnce(`section:${name}`, "section-view", { section: name });
+        timers.delete(name);
+      }, DWELL_MS));
     }
-  }, { threshold: 0.55 });
+  }, { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] });
 
   for (const [name, sel] of targets) {
     const node = document.querySelector(sel);
@@ -583,7 +617,7 @@ function drawMap(rows) {
 
   // Fires on the first pan or zoom only. `movestart` also fires for programmatic moves, so
   // this is filtered to gestures the reader actually made.
-  map.on("movestart", e => { if (e.originalEvent) trackOnce("map-interact"); });
+  map.on("movestart", e => { if (e.originalEvent) trackOnce("map-interact", "map-interact"); });
 
   map.on("click", "stations", e => showStation(e.features[0].properties, "map"));
 

@@ -104,7 +104,9 @@ front of the file, then only the bytes for the tiles on screen. Same pattern as 
 index that turns a logical request into a byte range. No tile server, no API key.
 
 **Everything is one origin.** Page, data, libraries and basemap all sit behind one
-distribution, so there is no CORS and no third-party runtime dependency.
+distribution, so there is no CORS. The single exception is a deferred, cookieless analytics
+script; every call into it no-ops when it is absent, so a reader who blocks trackers gets
+the identical page.
 
 ## Methodology
 
