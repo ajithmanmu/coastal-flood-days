@@ -51,7 +51,7 @@ jobs:
       - name: Verify the page is live and the archive is not
         run: |
           set -euo pipefail
-          U=https://d39egagpmdjbzd.cloudfront.net
+          U=https://floodhours.ajithmanmadhan.com
 
           # CloudFront serves the previous object until the invalidation lands, so retry
           # rather than asserting immediately.

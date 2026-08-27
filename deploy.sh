@@ -47,4 +47,4 @@ aws cloudfront create-invalidation --distribution-id "$DIST" \
   --paths "/index.html" "/vendor/*" \
   "${PROFILE_ARG[@]}" --region "$REGION" --query 'Invalidation.Status' --output text
 
-echo "deployed: https://d39egagpmdjbzd.cloudfront.net"
+echo "deployed: https://floodhours.ajithmanmadhan.com"

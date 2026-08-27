@@ -3,7 +3,7 @@
 **NOAA publishes how many *days* each US coastal gauge floods. It doesn't publish how long
 the water stays up. This does.**
 
-🌊 **[d39egagpmdjbzd.cloudfront.net](https://d39egagpmdjbzd.cloudfront.net)**
+🌊 **[floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com)**
 
 A flood day is a binary: one day whose water level crossed the local threshold. But across
 these 137 gauges, one flood day means anything from just over an hour above the line to most

@@ -26,6 +26,11 @@ data "aws_cloudfront_cache_policy" "optimized" {
 resource "aws_cloudfront_distribution" "site" {
   enabled             = true
   default_root_object = "index.html"
+
+  # Off by default in this provider, which makes the AAAA alias record in domain.tf point
+  # at a distribution that will not answer over IPv6 -- a resolvable name that fails to
+  # connect, which is worse than no record at all.
+  is_ipv6_enabled = true
   comment             = "coastal-flood-days"
   price_class         = "PriceClass_100" # NA + EU; the audience is US-coastal
 
@@ -50,8 +55,16 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
+  # The custom hostname. The generated *.cloudfront.net name keeps working
+  # alongside it, so nothing breaks while DNS propagates.
+  aliases = [var.domain_name]
+
   viewer_certificate {
-    cloudfront_default_certificate = true
+    acm_certificate_arn = aws_acm_certificate_validation.site.certificate_arn
+    ssl_support_method  = "sni-only"
+    # TLS 1.2 floor. The default policy allows 1.0, which no current client needs
+    # and which fails most security scanners on sight.
+    minimum_protocol_version = "TLSv1.2_2021"
   }
 }
 
