@@ -159,29 +159,27 @@ resource "aws_iam_role_policy" "scheduler" {
 ###############################################################################
 # Alarms
 #
-# Two, and the second is the one that matters. A job that never runs looks
-# identical to a healthy one if you only watch error counts -- that is exactly
-# the gap behind MAR-886 at work, and it is the failure this pipeline is most
-# likely to have.
+# One, and it is the one that matters. A job that never runs looks identical to a
+# healthy one if you only watch error counts -- that is exactly the gap behind
+# MAR-886 at work, and it is the failure this pipeline is most likely to have.
+#
+# The error-count alarm was removed on 2026-08-27 at the owner's request. Every
+# notification it ever sent came from manual invocations during one debugging
+# session; it never once fired on a scheduled run. The trade is real and worth
+# stating: a run that fails outright is now silent. What still catches it --
+#
+#   - the did-not-run alarm below, if failures continue past 25 hours
+#   - `results/last_updated.json`, which carries the timestamp of the last
+#     successful publish and the list of stations that failed
+#   - the refuse-to-publish guards in daily.py, which mean a failed run leaves
+#     the previous data live rather than replacing it with something worse
+#
+# Re-add it by restoring this resource if the silence ever costs more than the
+# email did.
 ###############################################################################
 
 resource "aws_sns_topic" "alerts" {
   name = "coastal-flood-days-alerts"
-}
-
-resource "aws_cloudwatch_metric_alarm" "daily_errors" {
-  alarm_name          = "coastal-flood-days-daily-errors"
-  alarm_description   = "The daily refresh raised an error."
-  namespace           = "AWS/Lambda"
-  metric_name         = "Errors"
-  dimensions          = { FunctionName = aws_lambda_function.daily.function_name }
-  statistic           = "Sum"
-  period              = 86400
-  evaluation_periods  = 1
-  threshold           = 0
-  comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.alerts.arn]
 }
 
 resource "aws_cloudwatch_metric_alarm" "daily_did_not_run" {

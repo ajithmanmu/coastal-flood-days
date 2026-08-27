@@ -188,6 +188,13 @@ passed. The only assertion that would have caught it is the one about what is *n
 > disappears on the next daily run. The page falls back to figures it can derive from the
 > station list, so this degrades rather than breaks — but nothing enforces the ordering.
 
+**Monitoring is deliberately thin.** One alarm, on the job not running for 25 hours — a
+pipeline that silently stops is the failure this is most likely to have. There is no alarm
+on error counts; a run that fails outright is caught by `results/last_updated.json`, which
+carries the last successful publish time and the stations that failed, and by the
+refuse-to-publish guards, which leave the previous data live rather than replacing it with
+something worse.
+
 Infrastructure is Terraform in `infra/`. **State is local and gitignored** — one laptop
 failure from unrecoverable. Moving it to an S3 backend is outstanding.
 
