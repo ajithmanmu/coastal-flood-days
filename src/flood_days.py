@@ -1,18 +1,33 @@
-"""Count flood days for a single NOAA CO-OPS station.
+"""Count flood days AND flood hours for a single NOAA CO-OPS station.
+
+The hours are the point. NOAA already publishes the day counts; what it does not publish
+is how long the water stayed up, and that is what this file computes alongside them.
 
 Rules encoded here (from the project note):
 
-  1. Daily maximum, binary count. One day whose max level exceeds the threshold is
+  1. Daily maximum, binary count. One day whose maximum level reaches the threshold is
      one flood day, no matter how many times it crossed.
   2. Station-specific NOS thresholds, fetched from NOAA. Never invented.
   3. Never MHHW as the threshold. MHHW is the average high tide and is exceeded about
      half the days of the year by definition.
-  4. One timezone throughout. We use Local Standard Time, never local daylight time.
+  4. One timezone throughout -- GMT, not local standard time. Settled by measurement
+     against NOAA's own published counts, not by preference. See TIME_ZONE.
   5. Completeness filter. A year under 90% valid records is flagged, not silently
      reported as a low-flood year.
   6. Fixed vertical reference. See DATUM below.
- 11. The event rule is declared, not implied. NOAA's definition is "exceeds", so this
-     is strictly greater than, not >=.
+  9. Hourly observations are a valid proxy for CUMULATIVE hours, not for the length of
+     any single flood. See summarise_year.
+ 10. "Exposure duration", never "impact duration". These are hours at a gauge, not hours
+     a road was shut. See FloodYear.hours_per_flood_day.
+ 11. The event rule is declared, not implied -- and it is `>=`, not `>`. NOAA's wording
+     says "exceeds", which reads as strictly greater; their data disagrees. See
+     summarise_year for the measurement.
+
+Two of these rules once said the opposite. Rule 4 read "Local Standard Time" and rule 11
+read "strictly greater than", both matching NOAA's documentation and neither matching
+NOAA's data. They were corrected in the code when the 2x2 test was run, and this docstring
+was not -- so for a while the header of this file contradicted the function below it. If a
+rule here and the code ever disagree again, the code is the one that was tested.
 """
 
 import calendar
