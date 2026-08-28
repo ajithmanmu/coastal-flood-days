@@ -20,8 +20,13 @@ Coastal floods come far more often than they used to. **They don't last any long
   **1.97 hours** in its last — a median across the 41 longest records.
 
 More floods, the same shape. How long a flood lasts turns out to be a property of *place*,
-not of time: it ranges from 1.5 to 6.2 hours across 8 in 10 gauges, set by tidal regime and
-basin geometry, and barely moves across a century at any one of them.
+not of time: one flood day means about an hour at Monterey and about nine and a half at
+Rockport, TX — set by tidal regime and basin geometry, and barely moving across a century at
+any one station. NOAA's published counts score both as "one flood day".
+
+The site shows this rather than asserting it: a slope chart draws all 86 long-record stations,
+each a line from its first decade of record to its most recent, so the 73 rising and 13 flat
+are visible at a glance.
 
 **This is not new science.** The metric is standard in the literature and the geographic
 pattern is already published. NOAA's
@@ -38,6 +43,7 @@ produces it.
 |---|---|
 | Gauges | **137** |
 | Station-years | **7,743** computed · **6,848** usable (≥90% complete) |
+| Hourly readings | **59.5 million**, counted individually |
 | Span | **1920–2026** |
 | Longest record | The Battery, NY — 91 usable years, 1921–2025 |
 
@@ -48,7 +54,7 @@ Computed from raw hourly water-level observations, not from NOAA's published cou
 | Path | What |
 |---|---|
 | `results/flood_days.parquet` | the dataset — every station-year, nothing hidden |
-| `results/map_summary.json` | ~137 rows, what the map loads on first paint |
+| `results/map_summary.json` | ~137 station rows, the headline figures, and the then-vs-now trajectories — everything the page needs on first paint |
 | `results/stations/{id}.json` | one station's full annual record |
 | `results/last_updated.json` | when the daily refresh last published, and what failed |
 

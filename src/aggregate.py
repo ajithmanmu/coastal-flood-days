@@ -180,6 +180,13 @@ def headline_stats(results: pd.DataFrame) -> dict:
         "hours_per_flood_now": round(float(pd.Series(now).median()), 2),
         "duration_records": len(now),
         "station_years": int(len(usable)),
+        # "Station-years" is a term only the field uses. The reading count says the same
+        # thing to anyone: this is the whole record, counted, not a sample.
+        "hourly_readings": round(float(
+            (usable["completeness"] * usable["year"].map(
+                lambda y: (366 if y % 4 == 0 and (y % 100 != 0 or y % 400 == 0) else 365) * 24
+            )).sum() / 1e6
+        ), 1),
         "station_years_total": int(len(results)),
         "station_years_excluded": int(len(results) - len(usable)),
         "first_year": int(results["year"].min()),
@@ -187,6 +194,37 @@ def headline_stats(results: pd.DataFrame) -> dict:
     }
     stats.update(agreement(usable))
     return stats
+
+
+def trajectories(results: pd.DataFrame) -> list[dict]:
+    """One row per long-record station: flood days per year then, and now.
+
+    This is what makes the headline checkable. The map and the scatter both show only the
+    recent decade, so nothing on the page showed change over time -- the reader had to take
+    "73 of 86 flood more often" on trust, or click through stations one at a time.
+
+    Each station is compared against itself, first decade of its own record against its
+    last, because the set of reporting stations changes enormously across a century and a
+    cross-sectional average would track that churn rather than the climate.
+    """
+    usable = results[results["usable"]]
+    counts = usable.groupby("station")["year"].count()
+    long_records = counts[counts >= MIN_YEARS_FOR_TREND].index
+
+    rows = []
+    for station, block in usable[usable["station"].isin(long_records)].groupby("station"):
+        first, last = block["year"].min(), block["year"].max()
+        early = block[block["year"] <= first + 9]
+        late = block[block["year"] >= last - 9]
+        rows.append({
+            "station": station,
+            "name": block["name"].iloc[0],
+            "then": round(float(early["flood_days"].mean()), 2),
+            "now": round(float(late["flood_days"].mean()), 2),
+            "from_year": int(first),
+            "to_year": int(last),
+        })
+    return sorted(rows, key=lambda r: r["now"] - r["then"], reverse=True)
 
 
 def agreement(usable: pd.DataFrame) -> dict:
@@ -233,6 +271,7 @@ def write(results: pd.DataFrame, summary: pd.DataFrame) -> None:
                 "generated": pd.Timestamp.utcnow().isoformat(),
                 "note": "hours above NOS minor threshold at the gauge; not road-closure time",
                 "headline": headline_stats(results),
+                "trajectories": trajectories(results),
                 "stations": json.loads(summary.to_json(orient="records")),
             },
             indent=1,

@@ -228,6 +228,10 @@
   .sizekey { display: flex; align-items: center; gap: 7px; }
   .sizekey i { display: inline-block; border-radius: 50%; background: var(--muted); opacity: .55; }
 
+  .slope { cursor: pointer; }
+  .slope:hover { stroke-opacity: 1; stroke-width: 3; }
+  #change { margin-top: 4px; }
+
   .chartlab { font-size: 0.86rem; font-weight: 600; margin: 0 0 8px; color: var(--ink); }
 
   .detailhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
@@ -281,6 +285,12 @@
   <p class="sub">Tide gauges along the US coast record when the sea rises above the local flood line. NOAA publishes how many <em>days</em> that happens — not how long the water stays up. This measures that, at 137 gauges across every year on record.</p>
 
   <div class="cards" id="cards"></div>
+
+  <div class="panel" id="change-panel">
+    <h2>Then and now, at every station with a long enough record</h2>
+    <p class="note" id="changeNote">Each line is one station: the left end is how often it flooded in its first ten years of record, the right end is its most recent ten. <strong>Click any line for that station's full history.</strong></p>
+    <svg id="change" viewBox="0 0 900 300" role="img" aria-label="Flood days then versus now at every long-record station"></svg>
+  </div>
 
   <div class="panel">
     <h2>Where floods are frequent, and where they linger</h2>
@@ -480,6 +490,7 @@ async function load() {
 }
 
 let stations = [];
+let trajectories = [];
 let map = null;
 let selected = null;
 
@@ -679,17 +690,32 @@ function cards(h) {
   // exactly what a stale Lambda image does -- fall back to figures derivable from the
   // stations list rather than rendering "undefined" or no cards at all.
   const rows = h ? [
-    [`${h.gauges_more_frequent} of ${h.gauges_compared}`, "gauges with a long record now flood more often than when they opened"],
-    [`${h.hours_per_flood_then} → ${h.hours_per_flood_now} hrs`, "how long a typical flood lasted then, and now"],
+    // Card 1 states what the slope chart below shows. "Stations", not "gauges" -- the
+    // technical word buys nothing on the first thing a reader sees.
+    [`${h.gauges_more_frequent} of ${h.gauges_compared}`,
+     "stations flood more often today than when their records began"],
+
+    // Card 2 owns the non-change. Led with "unchanged" rather than the pair of numbers,
+    // because otherwise it reads as a national average and collides with card 3.
+    ["unchanged",
+     `how long one flood lasts: ${h.hours_per_flood_then} hrs a century ago, ${h.hours_per_flood_now} hrs today`],
   ] : [
-    [stations.length, "coastal gauges, every usable year on record"],
-    [`${fmt(quantile(spread, 0.5))} hrs`, "how long a typical flood lasts"],
+    [stations.length, "coastal stations, every usable year on record"],
+    ["–", "how long one flood lasts"],
   ];
 
   rows.push(
-    [`${fmt(quantile(spread, 0.1))}–${fmt(quantile(spread, 0.9))} hrs`,
-     "how long a flood lasts at 8 in 10 gauges — length depends on the coast"],
-    [(h?.station_years ?? years).toLocaleString(), "station-years computed from hourly sea-level readings"],
+    // Card 3 owns the variation between places, which is the reason the project exists.
+    // Full range, nothing trimmed: Berwick's 22 hours belongs here precisely because NOAA
+    // scores it as one flood day, exactly like Monterey's one hour.
+    [`${fmt(spread[0], 0)}–${fmt(spread.at(-1), 0)} hrs`,
+     "what a single \u201cflood day\u201d can mean, depending on the place"],
+
+    // Card 4 is the credibility line. "Station-years" is a term only the field uses;
+    // the reading count says the same thing to anyone.
+    [h?.hourly_readings ? `${h.hourly_readings} million` : years.toLocaleString(),
+     h?.hourly_readings ? "hourly sea-level readings, counted one by one"
+                        : "station-years computed from hourly readings"],
   );
   return rows.map(([v, k]) => `<div class="card"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
 }
@@ -728,7 +754,7 @@ function render(headline) {
 
   // Each chart is isolated: a single bad station should degrade one panel, not blank
   // the page. Found the hard way -- a one-station map produced a zero-width extent.
-  for (const [fn, arg] of [[drawMap, stations], [drawScatter, stations], [drawTable, stations]]) {
+  for (const [fn, arg] of [[drawChange, trajectories], [drawMap, stations], [drawScatter, stations], [drawTable, stations]]) {
     try { fn(arg); } catch (err) { console.error(fn.name, err); }
   }
 
@@ -746,6 +772,96 @@ function niceAxis(max, count = 4) {
   const ticks = [];
   for (let v = 0; v <= top + step * 1e-6; v += step) ticks.push(+v.toFixed(4));
   return { top, ticks };
+}
+
+// Slope chart: one line per long-record station, first decade of its own record on the
+// left, last decade on the right. The page's claim is that floods got more frequent, and
+// until this existed nothing showed it -- the map and the scatter both only describe the
+// present, so the reader had to trust the number or click stations one at a time.
+//
+// Square-root vertical scale. Linear, Kwajalein at 65 days/yr flattens the eighty stations
+// under 10 into a single band at the axis; log cannot be used because stations that opened
+// with zero flood days are the most interesting lines on the chart.
+function drawChange(rows) {
+  const svg = $("#change"); svg.replaceChildren();
+  if (!rows?.length) return;
+
+  const W = 900, H = 300, L = 46, R = 150, T = 18, B = 34;
+  const x0 = L, x1 = W - R;
+  const top = Math.max(...rows.map(r => Math.max(r.then, r.now))) * 1.05;
+  const Y = v => H - B - (Math.sqrt(Math.max(v, 0)) / Math.sqrt(top)) * (H - B - T);
+
+  const g = el("g", { class: "grid" });
+  for (const v of [0, 1, 5, 15, 30, 60]) {
+    if (v > top) continue;
+    const y = Y(v);
+    g.appendChild(el("line", { x1: x0, x2: x1, y1: y, y2: y }));
+    const t = el("text", { x: x0 - 8, y: y + 3.5, "text-anchor": "end" });
+    t.textContent = v; g.appendChild(t);
+  }
+  svg.appendChild(g);
+
+  for (const [x, label] of [[x0, "first 10 years"], [x1, "most recent 10 years"]]) {
+    const t = el("text", { x, y: H - B + 17, "text-anchor": "middle", class: "axis-title" });
+    t.textContent = label; svg.appendChild(t);
+  }
+
+  const rising = rows.filter(r => r.now > r.then).length;
+  for (const r of rows) {
+    const up = r.now > r.then;
+    const line = el("line", {
+      class: "slope", x1: x0, y1: Y(r.then), x2: x1, y2: Y(r.now),
+      stroke: up ? "var(--s4)" : "var(--muted)",
+      "stroke-width": up ? 1.6 : 1.1,
+      "stroke-opacity": up ? 0.75 : 0.5,
+      "data-station": r.station,
+    });
+    line.addEventListener("mousemove", e => {
+      const tip = $("#tip");
+      tip.innerHTML = `<b>${r.name}</b>
+        <span class="r">${r.then} flood days/yr in ${r.from_year}–${r.from_year + 9}</span><br>
+        <span class="r">${r.now} flood days/yr in ${r.to_year - 9}–${r.to_year}</span>`;
+      tip.style.opacity = 1;
+      tip.style.left = Math.min(e.clientX + 14, innerWidth - 260) + "px";
+      tip.style.top = (e.clientY + 16) + "px";
+    });
+    line.addEventListener("mouseleave", () => { $("#tip").style.opacity = 0; });
+    line.addEventListener("click", () => {
+      const s = stations.find(x => x.station === r.station);
+      if (s) showStation(s, "change-chart");
+    });
+    svg.appendChild(line);
+  }
+
+  // Label only the few steepest risers. Naming all 86 is unreadable; naming none makes the
+  // chart abstract, and the extremes are the ones a reader wants to identify.
+  const steepest = [...rows].sort((a, b) => (b.now - b.then) - (a.now - a.then)).slice(0, 5);
+
+  // Push labels apart where their lines land close together. Two of the five overlapped
+  // into an unreadable smear at the default positions, which is the usual fate of labels
+  // placed at the data's y and never checked.
+  const GAP = 13;
+  const placed = steepest
+    .map(r => ({ r, y: Y(r.now) + 3.5 }))
+    .sort((a, b) => a.y - b.y);
+  for (let i = 1; i < placed.length; i++) {
+    if (placed[i].y - placed[i - 1].y < GAP) placed[i].y = placed[i - 1].y + GAP;
+  }
+
+  for (const { r, y } of placed) {
+    // Leader line, since a nudged label no longer sits on its own line's endpoint.
+    svg.appendChild(el("line", {
+      x1: x1, y1: Y(r.now), x2: x1 + 5, y2: y - 3.5,
+      stroke: "var(--axis)", "stroke-width": 0.75,
+    }));
+    const t = el("text", { x: x1 + 8, y, "text-anchor": "start" });
+    t.textContent = `${r.name.split(",")[0]} · ${fmt(r.then, 0)}→${fmt(r.now, 0)}`;
+    svg.appendChild(t);
+  }
+
+  const caption = el("text", { x: x0, y: T - 4, "text-anchor": "start", class: "axis-title" });
+  caption.textContent = `${rising} of ${rows.length} stations flood more often now`;
+  svg.appendChild(caption);
 }
 
 function drawScatter(rows) {
@@ -993,7 +1109,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     applySelection();
   });
   // Both redraws discard their DOM, so the highlight is re-applied rather than assumed.
-  try { drawScatter(stations); drawTable(stations); applySelection(); } catch (err) { console.error(err); }
+  try { drawChange(trajectories); drawScatter(stations); drawTable(stations); applySelection(); } catch (err) { console.error(err); }
 });
 
 // Bootstrap last. Several helpers are const arrows, so calling render() from above their
@@ -1002,6 +1118,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
 try {
   const data = await load();
   stations = data.stations.filter(s => s.lat != null && s.days_per_year != null);
+  trajectories = data.trajectories ?? [];
   render(data.headline);
 } catch (err) {
   console.error(err);
