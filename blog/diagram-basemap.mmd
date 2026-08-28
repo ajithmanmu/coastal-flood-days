@@ -1,0 +1,15 @@
+flowchart LR
+    planet[("Protomaps planet<br/>137 GB<br/>never downloaded")]
+    region["region.geojson<br/>8 rectangles"]
+    extract["pmtiles extract"]
+    ours[("our copy in S3<br/>382 MB")]
+    browser["browser"]
+
+    region --> extract
+    planet -->|"80 range requests<br/>35 seconds"| extract
+    extract --> ours
+    ours -->|"Range: bytes=40112880-40169999<br/>206 Partial Content"| browser
+
+    style planet fill:#2c2c2a,stroke:#2c2c2a,color:#ffffff
+    style ours fill:#f16913,stroke:#f16913,color:#ffffff
+    style browser fill:#1a1a19,stroke:#1a1a19,color:#ffffff

@@ -4,29 +4,41 @@ published: false
 tags: aws, python, data, serverless
 ---
 
-NOAA will tell you that Galveston Pier 21 flooded 26 days last year. It won't tell you that a flood there lasts about seven and a half hours, while the same "flood day" at Monterey means about one.
+Boston and Galveston flood about the same number of days a year. Thirteen and sixteen.
 
-Both count as 1. That's the whole problem.
+Their flood days are nothing alike. A flood in Boston lasts about ninety minutes. A flood in Galveston lasts about seven and a half hours.
 
-A flood day is a binary: did the water cross the local threshold at any point? A puddle that drains in forty minutes and water sitting over a road for most of a working day score identically. NOAA publishes those counts for 137 US tide gauges going back a century, and they're the numbers everyone cites. The duration isn't published anywhere as a dataset.
+The published counts score them the same.
 
-So I computed it. 137 gauges, 7,743 station-years, 59.5 million hourly readings, 1920 to today. The result is live at [floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com) and the Parquet file is there to download.
+A flood day is a binary: did the water cross the local threshold at any point? Water that drains inside an hour and water sitting over a road for most of a working day come out identical. NOAA has kept those counts for 137 US tide gauges for a century. The duration behind them has never been published as a dataset.
+
+So I computed it. 137 gauges, 7,743 station-years, 59.5 million hourly readings, 1920 to today. It's live at [floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com), and the Parquet file carries every station-year: flood days, flood hours, and how long a typical flood lasted at that station.
 
 **Stack:** Python (pandas, requests), AWS Fargate for the one-time backfill, Lambda + EventBridge for the daily refresh, S3, CloudFront, Terraform, MapLibre GL, PMTiles.
 
 ## What The Data Says
 
-Two findings, and the second one surprised me.
-
 **Floods got much more frequent.** Of the 86 gauges with records long enough to compare their first decade against their most recent, 73 flood more often now. Galveston went from 0.7 flood days a year across 1920–1999 to 15.9 in the last ten.
 
 **They didn't get longer.** Across the 41 longest records, the typical flood ran 1.95 hours in a gauge's first decade and 1.97 hours in its last. That's a century apart. Galveston's floods were 8.2 hours each back then and 7.5 hours now.
 
-More floods. Same shape. How long a flood lasts turns out to be a property of place, not time: it's set by tidal regime and basin geometry, and it barely moves.
+More floods. Same shape. I expected the second number to climb with the first and it doesn't move at all. How long a flood lasts is set by tidal regime and basin geometry, which is a fact about the place rather than about the year.
+
+## What The Pipeline Looks Like
+
+NOAA holds a century of hourly water levels and I need all of them. I'd rather ask once.
+
+So the first job downloads everything: 137 stations, every year back to 1920, saved into S3 as one Parquet file per station-year. It ran once on Fargate and hasn't had to run since. It also has a stop button, a flag in SSM that the job checks between stations, because a script that hammers someone else's free API for hours is one you want to be able to halt without killing the container mid-write.
+
+The second job runs every morning on Lambda. It downloads the current year again for all 137 stations, because NOAA keeps revising recent readings for weeks after first publishing them. I could fetch just the last few days instead, but then I'm guessing how far back the corrections reach. A whole year is one API call, the same as a single day, so I take the year and the guess goes away.
+
+Counting is a separate step that reads those saved files rather than calling NOAA. So changing how a flood day is defined means recounting 59.5 million readings locally, with no requests to their servers at all.
+
+The saved readings stay private in S3. Only the counted results are public.
+
+![The pipeline: one backfill, one daily refresh, and counting that never calls NOAA](diagram-pipeline.png)
 
 ## The Two Rules That Decide Everything
-
-Here's where it got interesting, and where I nearly shipped wrong numbers.
 
 To count a flood day you need two definitions that sound trivial. What counts as a "day," and what counts as "crossing" the threshold. Both have an obvious answer. Both obvious answers are wrong.
 
@@ -80,6 +92,8 @@ That's plain HTTP, the same mechanism that resumes a paused download. S3 and Clo
 
 If you've worked with GRIB2 weather files you've seen this before: the `.idx` sidecar does exactly this, and Kerchunk generalises it. One immutable blob in object storage plus an index, and byte ranges turn it into something you query instead of something you download.
 
+![Cutting 382 MB out of a 137 GB file with byte-range requests, then serving it the same way](diagram-basemap.png)
+
 Storage cost for the basemap: about a cent a month.
 
 ## The Feature I Built And Deleted
@@ -119,24 +133,9 @@ Neither the block nor the disguise is documented anywhere obvious.
 
 **The guard that mattered.** Through both broken runs the published dataset was never touched. `daily.py` refuses to publish if too few stations refreshed, so a failed run leaves yesterday's data live rather than replacing 137 stations with nothing. That check was written months earlier for exactly this and it earned its place in an afternoon.
 
-## What The Pipeline Looks Like
-
-Two jobs, not one.
-
-The backfill walks a century once, on Fargate, and caches every station-year as Parquet in S3. It has a kill switch in SSM and caps on requests, hours and consecutive failures. Fetching a century from someone else's free API is the kind of thing you want to be able to stop instantly.
-
-The daily job refetches the current year for every station. Not yesterday, the whole year, because NOAA revises recent readings for weeks and a trailing window is a guess about how far back to look. `hourly_height` returns up to a year per request, so a whole year costs the same single call as one day. The guess disappears.
-
-Everything downstream recomputes from the cache. A change to a counting rule costs nothing at NOAA.
-
-```
-raw/station=8518750/year=2024.parquet    14,659 files, 744 MB, private
-results/flood_days.parquet               the dataset, 51 KB, public
-```
-
-Two-thirds of the bucket is the raw archive, and it's the only part that isn't public. Which brings me to the bug I'm least proud of.
-
 ## The Security Bug Every Test Passed
+
+That private raw archive was not private for a while.
 
 The bucket policy granted CloudFront `s3:GetObject` on `/*`. Direct S3 access was correctly denied. Every check I ran came back green.
 

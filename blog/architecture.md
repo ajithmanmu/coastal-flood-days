@@ -1,7 +1,20 @@
 # Architecture
 
-Diagrams for the blog post. Mermaid, so they render on dev.to, GitHub and in Obsidian
-without an image pipeline.
+Mermaid source for the project's diagrams. These render on GitHub and in Obsidian.
+
+**dev.to does not render Mermaid** — its editor supports dozens of embeds and KaTeX, but no
+diagram syntax. The two diagrams used in the blog post are therefore checked in as PNGs
+alongside their `.mmd` source:
+
+    blog/diagram-pipeline.png   +  diagram-pipeline.mmd
+    blog/diagram-basemap.png    +  diagram-basemap.mmd
+
+Regenerate with:
+
+```bash
+npx @mermaid-js/mermaid-cli -i blog/diagram-pipeline.mmd -o blog/diagram-pipeline.png \
+  -c blog/mermaid-theme.json -b "#0d0d0d" -w 1400 --scale 2
+```
 
 ## The whole system
 

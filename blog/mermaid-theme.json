@@ -1,0 +1,4 @@
+{ "theme": "dark", "themeVariables": {
+  "background": "#0d0d0d", "primaryColor": "#1a1a19", "primaryTextColor": "#ffffff",
+  "primaryBorderColor": "#35342f", "lineColor": "#898781", "fontSize": "15px",
+  "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif" } }

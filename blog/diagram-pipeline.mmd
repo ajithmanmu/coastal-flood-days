@@ -1,0 +1,30 @@
+flowchart TB
+    api["NOAA CO-OPS<br/>water levels · thresholds · published flood-day counts"]
+
+    subgraph once["Runs once · Fargate"]
+        backfill["backfill<br/>a century, 137 stations"]
+    end
+
+    subgraph daily["Every morning · Lambda"]
+        refresh["daily refresh<br/>re-download the current year"]
+    end
+
+    raw[("saved readings<br/>14,659 Parquet files · 744 MB<br/>PRIVATE")]
+    agg["count flood days and hours"]
+    results[("published results<br/>769 KB · public")]
+    cf["CloudFront"]
+    page["floodhours.ajithmanmadhan.com"]
+
+    api --> backfill
+    api --> refresh
+    backfill --> raw
+    refresh --> raw
+    raw --> agg
+    agg --> results
+    results --> cf
+    cf --> page
+
+    style raw fill:#8c2d04,stroke:#8c2d04,color:#ffffff
+    style results fill:#f16913,stroke:#f16913,color:#ffffff
+    style page fill:#1a1a19,stroke:#1a1a19,color:#ffffff
+    style api fill:#2c2c2a,stroke:#2c2c2a,color:#ffffff
