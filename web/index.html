@@ -281,8 +281,8 @@
 </style>
 
 <div class="wrap">
-  <h1>Coastal floods come far more often than they used to. They still last about two hours.</h1>
-  <p class="sub">Tide gauges along the US coast record when the sea rises above the local flood line. NOAA publishes how many <em>days</em> that happens — not how long the water stays up. This measures that, at 137 gauges across every year on record.</p>
+  <h1>Some flood days last an hour. Some last twenty-two. All of them count as one.</h1>
+  <p class="sub">NOAA publishes how many <em>days</em> each US coastal gauge floods, but not how long the water stays up. This measures the hours, at 137 gauges across every year on record — and finds that floods come far more often than they used to while lasting about as long as they always have.</p>
 
   <div class="cards" id="cards"></div>
 
@@ -705,11 +705,11 @@ function cards(h) {
   ];
 
   rows.push(
-    // Card 3 owns the variation between places, which is the reason the project exists.
-    // Full range, nothing trimmed: Berwick's 22 hours belongs here precisely because NOAA
-    // scores it as one flood day, exactly like Monterey's one hour.
-    [`${fmt(spread[0], 0)}–${fmt(spread.at(-1), 0)} hrs`,
-     "what a single \u201cflood day\u201d can mean, depending on the place"],
+    // The headline states the 1-to-22 spread, so repeating it here would waste a card.
+    // The median is the missing half: most floods are short and the long tail is rare,
+    // which is not obvious from the extremes alone.
+    [`${fmt(quantile(spread, 0.5))} hrs`,
+     "what a flood day lasts at the typical station, with the rest spread either side"],
 
     // Card 4 is the credibility line. "Station-years" is a term only the field uses;
     // the reading count says the same thing to anyone.
