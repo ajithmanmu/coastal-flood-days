@@ -193,7 +193,7 @@ Every deploy re-runs the check that matters:
 raw/ -> 403
 ```
 
-A wildcard in the bucket policy once made the entire 736 MB raw archive publicly downloadable
+A wildcard in the bucket policy once made the entire 744 MB raw archive publicly downloadable
 through CloudFront while direct S3 access was correctly denied — so every positive test still
 passed. The only assertion that would have caught it is the one about what is *not* reachable.
 
