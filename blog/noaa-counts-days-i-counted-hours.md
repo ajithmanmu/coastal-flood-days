@@ -34,7 +34,7 @@ The second job runs every morning on Lambda. It downloads the current year again
 
 Counting is a separate step that reads those saved files rather than calling NOAA. So changing how a flood day is defined means recounting 59.5 million readings locally, with no requests to their servers at all.
 
-The saved readings stay private in S3. Only the counted results are public.
+The saved readings stay private in S3 and only the counted results are public. Every deploy checks that, by requesting a raw file through the CDN and failing the build if it returns anything but a 403.
 
 ![The pipeline: one backfill, one daily refresh, and counting that never calls NOAA](diagram-pipeline.png)
 
@@ -102,41 +102,15 @@ The map is where and the scatter is how the two numbers relate: across is how of
 
 There is no API and no database. The daily job precomputes everything into static files, so the site is one HTML page reading JSON from the same bucket. Nothing runs at request time.
 
-## Gotchas
+## The Day NOAA Started Blocking Me
 
-**NOAA started blocking us mid-project.** On a Wednesday the daily job ran fine at 10:04 UTC and every request failed by 13:45. NOAA had begun rejecting default client User-Agents on their metadata endpoint. Nothing in my code had changed.
+The daily job ran fine at 10:04 one Wednesday and every request failed by 13:45. NOAA had started rejecting requests that don't identify themselves, and mine didn't. Nothing in my code had changed.
 
-It hid in two disguises. My own call raised a clean 403. But `noaa_coops`, the library I use for water levels, raised `KeyError: 'stations'` — it builds requests with the bare `requests` module, sets no headers, then indexes the error body as though it were data. An HTTP block surfaced as a missing dictionary key. Fixing my own call left the library still broken, which cost me a second rebuild.
+The library I use for water levels made it harder to see. It got the same block, then read the error page as if it were data and raised `KeyError: 'stations'`. A 403 arrived looking like a missing dictionary key.
 
-Neither the block nor the disguise is documented anywhere obvious.
+The fix was a one-line User-Agent. I also added a short pause between stations, three retries with backoff, and a stop after 8 consecutive failures, so a dead endpoint fails in seconds rather than grinding through all 137 stations.
 
-**Retrying made the failure mode worse.** I added backoff, which is right, and immediately created a new problem: 137 stations each burning three attempts against a dead endpoint overran the Lambda's ceiling and died as a timeout instead of a clean failure. It now stops after 8 consecutive failures, because one shared upstream problem doesn't need proving 137 times.
-
-**The guard that mattered.** Through both broken runs the published dataset was never touched. `daily.py` refuses to publish if too few stations refreshed, so a failed run leaves yesterday's data live rather than replacing 137 stations with nothing. That check was written months earlier for exactly this and it earned its place in an afternoon.
-
-## The Security Bug Every Test Passed
-
-That private raw archive was not private for a while.
-
-The bucket policy granted CloudFront `s3:GetObject` on `/*`. Direct S3 access was correctly denied. Every check I ran came back green.
-
-The 744 MB raw archive was publicly downloadable through the CDN by anyone who guessed a key.
-
-I found it by testing the negative case instead of the positive one. The policy now enumerates exactly the paths the page needs, and every deploy asserts it:
-
-```
-raw/ -> 403
-```
-
-If that ever returns 200, the build fails. The only assertion that would have caught the original bug is the one about what *isn't* reachable.
-
-## What I'd Tell You To Take From This
-
-- **Test the negative case.** "Is the site up" passes whether or not your private data is exposed. Assert what should be unreachable, on every deploy.
-- **Where the docs and the data disagree, follow the data.** NOAA says "exceeds"; NOAA's numbers say `>=`. Test it, pick the one that matches, and state the choice in your methods.
-- **Change one variable at a time, or run the whole matrix.** I changed the operator alone, saw no improvement, and drew the wrong conclusion because a second variable was masking it.
-- **Byte ranges turn big files into queries.** A 137 GB archive you can read 16 bytes out of is a different kind of object than a 137 GB file you have to download. Same trick as `.idx` and Kerchunk.
-- **Guard the publish step, not just the fetch.** Two runs failed completely and the live dataset never wobbled, because the job refuses to publish a mostly-empty refresh.
+Through all of it the published data never moved. The job refuses to publish when too few stations refresh, so both failed runs left yesterday's numbers live instead of overwriting 137 stations with nothing. That check was the one piece of the pipeline I'd recommend to anyone building something similar.
 
 ## Is It Worth Building?
 
