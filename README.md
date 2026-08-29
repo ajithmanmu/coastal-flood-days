@@ -82,20 +82,27 @@ changed the answer:
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    api["NOAA CO-OPS<br/>water levels · thresholds · published flood-day counts"]
+    backfill["backfill · Fargate · once<br/>a century, 137 stations"]
+    refresh["daily refresh · Lambda · 10:00 UTC<br/>re-fetch the current year"]
+    raw[("raw/station=X/year=Y<br/>14,659 Parquet files · 744 MB<br/>private")]
+    agg["aggregate<br/>count days and hours"]
+    results[("results/<br/>769 KB · public")]
+    cf["CloudFront"]
+    page["static page + MapLibre"]
+
+    api --> backfill
+    api --> refresh
+    backfill --> raw
+    refresh --> raw
+    raw --> agg
+    agg --> results
+    results --> cf
+    cf --> page
 ```
-NOAA CO-OPS API
-      │
-      ├── backfill (Fargate, one-off) ──► s3://…/raw/station=X/year=Y/   736 MB
-      │                                        │
-      └── daily refresh (Lambda, 10:00 UTC) ───┤
-                                               ▼
-                                     aggregate ──► s3://…/results/
-                                                        │
-                                          CloudFront ◄──┘
-                                               │
-                                               ▼
-                                     static page + MapLibre
-```
+
 
 **Two pipelines, not one.** The backfill walks a century of history once and caches it. The
 daily job refetches the *current year* for every station — not a trailing window — because
