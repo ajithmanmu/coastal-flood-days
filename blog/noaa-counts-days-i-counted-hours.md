@@ -10,7 +10,9 @@ Their flood days are nothing alike. A flood in Boston lasts about ninety minutes
 
 The published counts score them the same.
 
-A flood day is a binary: did the water cross the local threshold at any point? Water that drains inside an hour and water sitting over a road for most of a working day come out identical. NOAA has kept those counts for 137 US tide gauges for a century. The duration behind them has never been published as a dataset.
+A flood day is a binary: did the water cross the local threshold at any point? Water that drains inside an hour and water sitting over a road for most of a working day come out identical. NOAA has kept those counts for 137 US tide gauges for a century.
+
+NOAA can work out duration too. Their [Inundation Analysis Tool](https://tidesandcurrents.noaa.gov/inundationanalysis/) does it for one station over a limited date range, and they publish a notebook that does something similar. What doesn't exist is the bulk version: every station, every year, in one file you can sort and compare.
 
 So I computed it. 137 gauges, 7,743 station-years, 59.5 million hourly readings, 1920 to today. It's live at [floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com), and the Parquet file carries every station-year: flood days, flood hours, and how long a typical flood lasted at that station.
 
@@ -49,7 +51,9 @@ NOAA also publishes its own flood-day counts, so I could check mine against thei
 
 That second one cost me an afternoon. I changed the operator first, saw no improvement, and decided it wasn't the problem. It was. The timezone was wrong too and was hiding it, and I only found both by testing all four combinations at once.
 
-Across 6,848 station-years my counts now match NOAA's exactly **95.75%** of the time, and within one day **99.61%**.
+One more rule before the numbers mean anything. A year missing more than 10% of its readings gets dropped rather than counted, because a gauge that was offline for two months looks calm and isn't. That removes 895 of 7,743 station-years, and every figure in this post comes from the 6,848 that survive.
+
+Across those 6,848 station-years my counts match NOAA's exactly **95.75%** of the time, and within one day **99.61%**.
 
 ## The 137 GB File I Never Downloaded
 
