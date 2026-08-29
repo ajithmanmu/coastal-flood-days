@@ -38,36 +38,26 @@ The saved readings stay private in S3. Only the counted results are public.
 
 ![The pipeline: one backfill, one daily refresh, and counting that never calls NOAA](diagram-pipeline.png)
 
-## The Two Rules That Decide Everything
+## Checking The Count Against NOAA
 
-To count a flood day you need two definitions that sound trivial. What counts as a "day," and what counts as "crossing" the threshold. Both have an obvious answer. Both obvious answers are wrong.
+First, where the line comes from. Every station has its own flood threshold, published by NOAA — 10.19 feet at The Battery, measured from that station's own zero mark on the pier. Not sea level, not a national figure. The water levels have to be requested in the same reference frame as the threshold, or you're comparing heights measured from two different starting points, which is a six-foot error that still produces perfectly plausible output.
 
-**The day boundary.** Local time is the intuitive choice, since that's the day people lived through. I tested both against NOAA's own published counts for nine stations in 2024. Local time disagreed by 9 days. GMT disagreed by 1.
+NOAA also publishes its own flood-day counts, so I could check mine against theirs. Two things came out wrong at first:
 
-**The comparison.** NOAA's documentation says a flood day is one where the water *"exceeds"* the threshold. In English and in code that means strictly greater than. Their data says otherwise: `>=` matches their counts better, so whatever produces NOAA's published numbers treats water sitting exactly at the threshold as a flood.
+- **Day boundaries.** I used local time. NOAA uses GMT. Switching cut my disagreement from 9 days to 1.
+- **The comparison.** NOAA's docs say the water must *"exceed"* the threshold, which reads as `>`. Their numbers behave as `>=` — water sitting exactly on the line counts as a flood.
 
-They interact, so I had to test all four combinations:
+That second one cost me an afternoon. I changed the operator first, saw no improvement, and decided it wasn't the problem. It was. The timezone was wrong too and was hiding it, and I only found both by testing all four combinations at once.
 
-| | Disagreement with NOAA |
-|---|---|
-| GMT + `>=` | **1 day** |
-| GMT + `>` | 3 days |
-| LST + `>` | 9 days |
-| LST + `>=` | 9 days |
-
-I spent longer than I'd like to admit getting there. My first attempt changed the operator on its own, and the error didn't move at all. I assumed the operator wasn't the problem. It was, but timezone was the dominant factor and was masking it completely. Only running the full matrix showed which mattered.
-
-Where the docs and the data disagree, follow the data and say so in your methods section. Both choices are stated on the page rather than buried.
-
-Final agreement across all 6,848 usable station-years: **95.75% exact, 99.61% within one day**, worst case 3 days off.
+Across 6,848 station-years my counts now match NOAA's exactly **95.75%** of the time, and within one day **99.61%**.
 
 ## The 137 GB File I Never Downloaded
 
-The site needs a map. The default answer is Mapbox or Google: an API key, per-request billing, and your site breaking when theirs does.
+The site needs a map. The usual answer is Mapbox or Google, which means an API key, a bill that grows with traffic, and one more service that has to be up for your page to work.
 
-I didn't want a runtime dependency on anyone else for a page that displays a static coastline. Coastlines don't move.
+None of that felt right for a page showing a coastline. Coastlines don't move.
 
-PMTiles solves this. It's a map chopped into thousands of small tiles, packed into one file, with an index at the front saying where each tile starts and how long it is. Protomaps publishes a daily build of the entire planet that way. It's 137 GB.
+PMTiles is the alternative. A map gets chopped into thousands of small tiles, and all of them are packed into a single file with an index at the front recording where each tile sits and how long it is. Protomaps publishes the entire planet in that format every day. It's 137 GB.
 
 You never download it. You read the index over the network, work out which tiles you want, and ask for those byte ranges:
 
@@ -77,49 +67,40 @@ pmtiles extract https://build.protomaps.com/20260820.pmtiles \
   --region=basemap/region.geojson --maxzoom=10
 ```
 
-`region.geojson` is eight rectangles: one around the mainland US, seven around Hawaii, Puerto Rico, Guam, Wake, Kwajalein, Midway and Samoa. Everything else gets skipped.
+`region.geojson` is eight rectangles: one around the mainland US, seven around Hawaii, Puerto Rico, Guam, Wake, Kwajalein, Midway and Samoa. Everything outside them is skipped.
 
 **382 MB out of 137 GB. Eighty HTTP requests. Thirty-five seconds.**
 
-The browser then does the same trick against my copy in S3:
+The browser then does the same thing against my copy in S3. It reads the index, works out which tiles are on screen, and asks for exactly those bytes:
 
 ```
 Range: bytes=40112880-40169999
-→ HTTP/2 206 Partial Content
+→ 206 Partial Content
 ```
 
-That's plain HTTP, the same mechanism that resumes a paused download. S3 and CloudFront both support it with no configuration. So a reader never downloads 382 MB; they pull a few kilobytes for whatever is on screen.
+A client asks for a byte range, S3 streams back that slice and answers `206 Partial Content` instead of `200`. It's been part of HTTP since the nineties — the same mechanism behind resuming a paused download — and neither S3 nor CloudFront needs anything switched on. So nobody downloads 382 MB. They pull a few kilobytes for whatever is on screen.
 
-If you've worked with GRIB2 weather files you've seen this before: the `.idx` sidecar does exactly this, and Kerchunk generalises it. One immutable blob in object storage plus an index, and byte ranges turn it into something you query instead of something you download.
+The pattern is bigger than maps. Weather data uses it: a GRIB2 file holds hundreds of forecast layers, and a small `.idx` file next to it lists the byte offset of each one, so you can pull the layer you want without reading the rest. A tool called Kerchunk does the same for scientific archives, building an index over files that were never designed to be read this way.
+
+The shape is always the same. One large file that doesn't change, an index describing what's inside it, and byte ranges that turn it into something you query rather than something you download.
 
 ![Cutting 382 MB out of a 137 GB file with byte-range requests, then serving it the same way](diagram-basemap.png)
 
 Storage cost for the basemap: about a cent a month.
 
-## The Feature I Built And Deleted
+## What The Site Shows
 
-The map plots 137 dots. A reviewer looked at it and said, reasonably, that dots don't show you where the problem is.
+Three views of the same data.
 
-So I shaded the coastline itself, colouring each stretch by its nearest gauge. It looked good. The Gulf lit up as a continuous pale band running into orange down Florida's Atlantic side.
+![The headline figures and the slope chart of every long-record station](site-chart.png)
 
-Then he zoomed into Puerto Rico. Two gauges, and the whole island's coast was coloured from them. He asked whether that meant the shoreline flooded at that level, or only that spot.
+The slope chart is the one I'd point at. Each line is a station, left end its first ten years of record, right end its most recent. 73 rise, 13 stay flat. That's the claim from the top of this post, drawn rather than asserted.
 
-Only that spot. Everything else was inference wearing the same colours as measurement — which is the exact objection I'd raised against his original idea of shaded polygons, and I'd gone and committed it on a line instead of an area.
+![The map and the frequency-versus-duration scatter](site-map.png)
 
-The honest move was to test how far the inference actually holds. Comparing every pair of gauges:
+The map is where and the scatter is how the two numbers relate: across is how often a station floods, up is total hours a year. High and left means rare but long. Low and right means often but brief. Clicking anything opens that station's full century underneath.
 
-| Gap between gauges | Pairs differing by >50% |
-|---|---|
-| 0–25 km | 10% |
-| 25–50 km | 14% |
-| 50–100 km | **35%** |
-| 100–200 km | 37% |
-
-Flood duration is spatially coherent to about 50 km and not much past it. My shading radius was 120 km, which meant roughly a third of the coloured coast carried a value the nearest real gauge would have contradicted by more than half.
-
-I deleted the feature. The map is dots, and the legend now says so directly: *nothing here is interpolated between them.*
-
-The measurement was worth more than the feature. It's a real result about the data, and it's the reason the honest map is points.
+There is no API and no database. The daily job precomputes everything into static files, so the site is one HTML page reading JSON from the same bucket. Nothing runs at request time.
 
 ## Gotchas
 
@@ -155,7 +136,6 @@ If that ever returns 200, the build fails. The only assertion that would have ca
 - **Where the docs and the data disagree, follow the data.** NOAA says "exceeds"; NOAA's numbers say `>=`. Test it, pick the one that matches, and state the choice in your methods.
 - **Change one variable at a time, or run the whole matrix.** I changed the operator alone, saw no improvement, and drew the wrong conclusion because a second variable was masking it.
 - **Byte ranges turn big files into queries.** A 137 GB archive you can read 16 bytes out of is a different kind of object than a 137 GB file you have to download. Same trick as `.idx` and Kerchunk.
-- **If a pattern only appears after interpolating, it isn't evidence.** Points, not surfaces. Measure how far your inference holds before you draw it.
 - **Guard the publish step, not just the fetch.** Two runs failed completely and the live dataset never wobbled, because the job refuses to publish a mostly-empty refresh.
 
 ## Is It Worth Building?
@@ -163,8 +143,6 @@ If that ever returns 200, the build fails. The only assertion that would have ca
 For the dataset, yes. Duration made comparable across thousands of station-years didn't exist in queryable form, and now it does. The science isn't new — the metric is standard and the geographic pattern is published — but the artifact wasn't there.
 
 For the engineering, the parts I'd reuse tomorrow are the byte-range basemap and the refuse-to-publish guard. Both are small, both solved a real problem, and neither took long.
-
-The part I'd skip is the ribbon. I built it because the map looked sparse, not because the data supported it, and it took a reviewer asking the same question three times before I stopped explaining and started measuring.
 
 Code, methods and the full dataset: [github.com/ajithmanmu/coastal-flood-days](https://github.com/ajithmanmu/coastal-flood-days)
 
