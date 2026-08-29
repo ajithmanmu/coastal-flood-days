@@ -741,6 +741,10 @@ function methods(h) {
     ["What this is not", "Exposure at the gauge, not impact on land. These are hours the water stood above a line in the water — not road closures, not property damage. Tide gauges systematically undercount street flooding."],
     ["Source", 'Every observation from <a href="https://tidesandcurrents.noaa.gov/">NOAA CO-OPS</a>' +
       (h?.first_year != null ? `, ${h.first_year}–${h.last_year}.` : ".")],
+    // Credit at the bottom, not the top. A data page that leads with its author reads as a
+    // portfolio piece; one that credits them beside the source reads as a dataset.
+    ["Built by", 'Ajith Manmadhan — <a href="https://portfolio.ajithmanmadhan.com">portfolio</a> · ' +
+      '<a href="https://github.com/ajithmanmu/coastal-flood-days">source and methods</a>'],
   ];
   return rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
 }
