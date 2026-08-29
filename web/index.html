@@ -454,9 +454,15 @@ const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? "–" : (+v).toFixed(d)
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 // Colour classes for hours-per-flood-day. Five bins: past ~7, adjacent classes blur.
-// Boundaries are the observed quintiles, not round numbers -- the distribution is
-// heavily right-skewed (median 2.6, max 22.3), and even bins put a third of the
-// stations in one class and left the map a single shade.
+//
+// Boundaries were set from the observed quintiles rather than round numbers -- the
+// distribution is heavily right-skewed (median 2.6, max 22.3), and even bins put a third
+// of the stations in one class and left the map a single shade.
+//
+// They are FIXED, not recomputed. The data refreshes daily, and bins derived from it each
+// run would let a station change colour because a neighbour's numbers moved, which makes
+// colour useless for comparing one visit to the next. The cost is drift: they now split
+// 36/28/22/25/23 against an even 27. Worth revisiting if a band empties out.
 const BINS = [1.8, 2.4, 3.6, 5.4];
 const band = v => v == null ? "var(--muted)" : `var(--s${BINS.findIndex(b => v < b) + 1 || 5})`;
 
