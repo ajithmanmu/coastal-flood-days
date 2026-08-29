@@ -5,6 +5,8 @@ the water stays up. This does.**
 
 🌊 **[floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com)**
 
+> 📝 Blog post: [NOAA Counts Flood Days. I Counted the Hours.](blog/noaa-counts-days-i-counted-hours.md) — draft, not yet published to dev.to
+
 A flood day is a binary: one day whose water level crossed the local threshold. But across
 these 137 gauges, one flood day means anything from just over an hour above the line to most
 of a day — and NOAA's published counts score every one of them the same. This computes the
