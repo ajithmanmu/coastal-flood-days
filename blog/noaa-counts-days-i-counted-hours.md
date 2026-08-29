@@ -12,7 +12,7 @@ The published counts score them the same.
 
 A flood day is a binary: did the water cross the local threshold at any point? Water that drains inside an hour and water sitting over a road for most of a working day come out identical. NOAA has kept those counts for 137 US tide gauges for a century.
 
-NOAA can work out duration too. Their [Inundation Analysis Tool](https://tidesandcurrents.noaa.gov/inundationanalysis/) does it for one station over a limited date range, and they publish a notebook that does something similar. What doesn't exist is the bulk version: every station, every year, in one file you can sort and compare.
+NOAA can work out duration too, with a [tool](https://tidesandcurrents.noaa.gov/inundationanalysis/) that handles one station at a time. Nobody had run it across all of them and put the answers in one file.
 
 So I computed it. 137 gauges, 7,743 station-years, 59.5 million hourly readings, 1920 to today. It's live at [floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com), and the Parquet file carries every station-year: flood days, flood hours, and how long a typical flood lasted at that station.
 
@@ -42,18 +42,18 @@ The saved readings stay private in S3 and only the counted results are public. E
 
 ## Checking The Count Against NOAA
 
-First, where the line comes from. Every station has its own flood threshold, published by NOAA — 10.19 feet at The Battery, measured from that station's own zero mark on the pier. Not sea level, not a national figure. The water levels have to be requested in the same reference frame as the threshold, or you're comparing heights measured from two different starting points, which is a six-foot error that still produces perfectly plausible output.
+Every station has its own flood threshold, published by NOAA. The Battery's is 10.19 feet, measured from that station's own zero mark on the pier rather than from sea level. The water levels have to be requested against the same mark, or you're comparing two different starting points and you're off by about six feet.
 
-NOAA also publishes its own flood-day counts, so I could check mine against theirs. Two things came out wrong at first:
+NOAA publishes its own flood-day counts, so I could check mine against theirs. Two things were wrong:
 
 - **Day boundaries.** I used local time. NOAA uses GMT. Switching cut my disagreement from 9 days to 1.
 - **The comparison.** NOAA's docs say the water must *"exceed"* the threshold, which reads as `>`. Their numbers behave as `>=` — water sitting exactly on the line counts as a flood.
 
-That second one cost me an afternoon. I changed the operator first, saw no improvement, and decided it wasn't the problem. It was. The timezone was wrong too and was hiding it, and I only found both by testing all four combinations at once.
+I found the second one late. I'd changed the operator on its own first, seen no improvement, and moved on. The timezone was wrong at the same time and hid the effect. Testing all four combinations together was what showed it.
 
-One more rule before the numbers mean anything. A year missing more than 10% of its readings gets dropped rather than counted, because a gauge that was offline for two months looks calm and isn't. That removes 895 of 7,743 station-years, and every figure in this post comes from the 6,848 that survive.
+One more rule before the numbers mean anything: a year missing more than 10% of its readings gets dropped rather than counted, because a gauge that was offline for two months looks calm and isn't. That removes 895 of 7,743 station-years.
 
-Across those 6,848 station-years my counts match NOAA's exactly **95.75%** of the time, and within one day **99.61%**.
+Across the remaining 6,848 my counts match NOAA's exactly **95.75%** of the time, and within one day **99.61%**.
 
 ## The 137 GB File I Never Downloaded
 
