@@ -90,15 +90,17 @@ Storage cost for the basemap: about a cent a month.
 
 ## What The Site Shows
 
-Three views of the same data.
-
-![The headline figures and the slope chart of every long-record station](site-chart.png)
+![The slope chart: every long-record station, first ten years against most recent](site-chart.png)
 
 The slope chart is the one I'd point at. Each line is a station, left end its first ten years of record, right end its most recent. 73 rise, 13 stay flat. That's the claim from the top of this post, drawn rather than asserted.
 
 ![The map and the frequency-versus-duration scatter](site-map.png)
 
-The map is where and the scatter is how the two numbers relate: across is how often a station floods, up is total hours a year. High and left means rare but long. Low and right means often but brief. Clicking anything opens that station's full century underneath.
+The map is where, and the scatter is how the two numbers relate: across is how often a station floods, up is total hours a year. High and left means rare but long. Low and right means often but brief.
+
+![One station's full record, flood days above and flood hours below](site-station.png)
+
+Clicking any station opens its century underneath. Galveston is a good one to look at — both panels have the same shape, which is what "more floods, same length" looks like when you draw it.
 
 There is no API and no database. The daily job precomputes everything into static files, so the site is one HTML page reading JSON from the same bucket. Nothing runs at request time.
 
@@ -112,11 +114,11 @@ The fix was a one-line User-Agent. I also added a short pause between stations, 
 
 Through all of it the published data never moved. The job refuses to publish when too few stations refresh, so both failed runs left yesterday's numbers live instead of overwriting 137 stations with nothing. That check was the one piece of the pipeline I'd recommend to anyone building something similar.
 
-## Is It Worth Building?
+## What I'd Keep
 
-For the dataset, yes. Duration made comparable across thousands of station-years didn't exist in queryable form, and now it does. The science isn't new — the metric is standard and the geographic pattern is published — but the artifact wasn't there.
+The dataset was worth making. Duration across thousands of station-years wasn't available anywhere in a form you could query, and now it is. None of the science is new — the metric is standard, the pattern is published — but nobody had put the numbers somewhere you could download them.
 
-For the engineering, the parts I'd reuse tomorrow are the byte-range basemap and the refuse-to-publish guard. Both are small, both solved a real problem, and neither took long.
+Two pieces of the build I'd use again. The basemap read by byte range, because it removed a paid service and a runtime dependency for the cost of one file in S3. And the check that stops the daily job publishing when too few stations come back, which is what kept the site correct while NOAA was blocking me.
 
 Code, methods and the full dataset: [github.com/ajithmanmu/coastal-flood-days](https://github.com/ajithmanmu/coastal-flood-days)
 
