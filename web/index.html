@@ -282,7 +282,7 @@
 
 <div class="wrap">
   <h1>Some flood days last an hour. Some last twenty-two. All of them count as one.</h1>
-  <p class="sub">NOAA publishes how many <em>days</em> each US coastal gauge floods, but not how long the water stays up. This measures the hours, at 137 gauges across every year on record — and finds that floods come far more often than they used to while lasting about as long as they always have.</p>
+  <p class="sub">NOAA publishes how many <em>days</em> each US coastal gauge floods, but not how long the water stays up. This measures the hours, at 137 gauges across every usable year on record — and finds that floods come far more often than they used to while lasting about as long as they always have.</p>
 
   <div class="cards" id="cards"></div>
 
@@ -739,6 +739,7 @@ function methods(h) {
       ? `Flood-day counts are computed independently from raw observations, then compared with NOAA's published counts: <strong>${h.exact_pct}% exact</strong>, ${h.within_one_day_pct}% within one day, across ${h.checked_against_noaa.toLocaleString()} station-years.`
       : "Flood-day counts are computed independently from raw observations and compared with NOAA's published counts."],
     ["What this is not", "Exposure at the gauge, not impact on land. These are hours the water stood above a line in the water — not road closures, not property damage. Tide gauges systematically undercount street flooding."],
+    ["What NOAA already has", 'NOAA can compute duration for a single station over a limited range with its <a href="https://tidesandcurrents.noaa.gov/inundationanalysis/">Inundation Analysis Tool</a>. What did not exist is this: every station and every year in one file.'],
     ["Source", 'Every observation from <a href="https://tidesandcurrents.noaa.gov/">NOAA CO-OPS</a>' +
       (h?.first_year != null ? `, ${h.first_year}–${h.last_year}.` : ".")],
     // Credit at the bottom, not the top. A data page that leads with its author reads as a
