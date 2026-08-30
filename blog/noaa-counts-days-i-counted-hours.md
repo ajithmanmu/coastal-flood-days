@@ -12,7 +12,7 @@ The published counts score them the same.
 
 A flood day is a binary: did the water cross the local threshold at any point? Water that drains inside an hour and water sitting over a road for most of a working day come out identical. NOAA has kept those counts for 137 US tide gauges for a century.
 
-NOAA can work out duration too, with a [tool](https://tidesandcurrents.noaa.gov/inundationanalysis/) that handles one station at a time. Nobody had run it across all of them and put the answers in one file.
+The hours behind those counts aren't published anywhere. NOAA has a [tool](https://tidesandcurrents.noaa.gov/inundationanalysis/) that works them out for one station over a limited date range, but nobody had run it across every gauge and put the answers in a single file.
 
 So I computed it. 137 gauges, 7,743 station-years, 59.5 million hourly readings, 1920 to today. It's live at [floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com), and the Parquet file carries every station-year: flood days, flood hours, and how long a typical flood lasted at that station.
 
@@ -30,9 +30,9 @@ More floods. Same shape. I expected the second number to climb with the first an
 
 NOAA holds a century of hourly water levels and I need all of them. I'd rather ask once.
 
-So the first job downloads everything: 137 stations, every year back to 1920, saved into S3 as one Parquet file per station-year. It ran once on Fargate and hasn't had to run since. It also has a stop button, a flag in SSM that the job checks between stations, because a script that hammers someone else's free API for hours is one you want to be able to halt without killing the container mid-write.
+The first job downloads everything: 137 stations, every year back to 1920, saved into S3 as one Parquet file per station-year. It ran once on Fargate and hasn't needed to run since. It reads a flag in SSM between stations, so a long run can be stopped without killing the container mid-write.
 
-The second job runs every morning on Lambda. It downloads the current year again for all 137 stations, because NOAA keeps revising recent readings for weeks after first publishing them. I could fetch just the last few days instead, but then I'm guessing how far back the corrections reach. A whole year is one API call, the same as a single day, so I take the year and the guess goes away.
+The second job runs every morning on Lambda and downloads the current year again for all 137 stations. NOAA revises recent readings for weeks after publishing them, so fetching only the last few days means guessing how far back the corrections reach. A whole year costs one API call, the same as a single day, so it fetches the year.
 
 Counting is a separate step that reads those saved files rather than calling NOAA. So changing how a flood day is defined means recounting 59.5 million readings locally, with no requests to their servers at all.
 
@@ -42,9 +42,11 @@ The saved readings stay private in S3 and only the counted results are public. E
 
 ## Checking The Count Against NOAA
 
-Every station has its own flood threshold, published by NOAA. The Battery's is 10.19 feet, measured from that station's own zero mark on the pier rather than from sea level. The water levels have to be requested against the same mark, or you're comparing two different starting points and you're off by about six feet.
+I'm counting flood days from raw readings, and NOAA already publishes its own count for the same stations and years. If my numbers match theirs, the flood *hours* I'm adding are probably right too. If they don't, nothing else in this post is worth reading.
 
-NOAA publishes its own flood-day counts, so I could check mine against theirs. Two things were wrong:
+First, the line itself. Every station has its own flood threshold, published by NOAA. The Battery's is 10.19 feet, measured from that station's own zero mark on the pier rather than from sea level. The water levels have to be requested against the same mark, or you're comparing two different starting points and you're off by about six feet.
+
+With that right, my counts still didn't match. Two reasons:
 
 - **Day boundaries.** I used local time. NOAA uses GMT. Switching cut my disagreement from 9 days to 1.
 - **The comparison.** NOAA's docs say the water must *"exceed"* the threshold, which reads as `>`. Their numbers behave as `>=` — water sitting exactly on the line counts as a flood.
@@ -75,18 +77,20 @@ pmtiles extract https://build.protomaps.com/20260820.pmtiles \
 
 **382 MB out of 137 GB. Eighty HTTP requests. Thirty-five seconds.**
 
-The browser then does the same thing against my copy in S3. It reads the index, works out which tiles are on screen, and asks for exactly those bytes:
+That runs once. The result is a smaller file in the same format, with its own index, and I upload it to S3 as a single object.
+
+Which means the browser can do exactly what the extract did, one level down. It reads the index off the front of my file, works out which tiles are on screen, and asks for those bytes:
 
 ```
 Range: bytes=40112880-40169999
 → 206 Partial Content
 ```
 
-A client asks for a byte range, S3 streams back that slice and answers `206 Partial Content` instead of `200`. It's been part of HTTP since the nineties — the same mechanism behind resuming a paused download — and neither S3 nor CloudFront needs anything switched on. So nobody downloads 382 MB. They pull a few kilobytes for whatever is on screen.
+A client asks for a byte range, S3 streams back that slice and answers `206 Partial Content` instead of `200`. It's a standard HTTP feature and neither S3 nor CloudFront needs anything switched on for it. Nobody downloads 382 MB; they pull a few kilobytes for whatever is on screen.
 
-The pattern is bigger than maps. Weather data uses it: a GRIB2 file holds hundreds of forecast layers, and a small `.idx` file next to it lists the byte offset of each one, so you can pull the layer you want without reading the rest. A tool called Kerchunk does the same for scientific archives, building an index over files that were never designed to be read this way.
+Strip out the maps and what's left is a general trick: one large file that doesn't change, an index saying what's inside it, and byte ranges that turn it into something you query instead of something you download.
 
-The shape is always the same. One large file that doesn't change, an index describing what's inside it, and byte ranges that turn it into something you query rather than something you download.
+Weather data does this already. A GRIB2 file holds hundreds of forecast layers, and a small `.idx` file beside it lists where each layer starts, so you can pull the one you need without reading the rest. Kerchunk extends the idea to scientific archives, building an index over files that were never designed to be read that way.
 
 ![Cutting 382 MB out of a 137 GB file with byte-range requests, then serving it the same way](diagram-basemap.png)
 
@@ -96,7 +100,7 @@ Storage cost for the basemap: about a cent a month.
 
 ![The slope chart: every long-record station, first ten years against most recent](site-chart.png)
 
-The slope chart is the one I'd point at. Each line is a station, left end its first ten years of record, right end its most recent. 73 rise, 13 stay flat. That's the claim from the top of this post, drawn rather than asserted.
+Each line is a station: left end its first ten years of record, right end its most recent. 73 rise, 13 stay flat. It's the same 73-of-86 figure from the cards, in a form you can check by looking.
 
 ![The map and the frequency-versus-duration scatter](site-map.png)
 
@@ -112,15 +116,15 @@ There is no API and no database. The daily job precomputes everything into stati
 
 The daily job ran fine at 10:04 one Wednesday and every request failed by 13:45. NOAA had started rejecting requests that don't identify themselves, and mine didn't. Nothing in my code had changed.
 
-The library I use for water levels made it harder to see. It got the same block, then read the error page as if it were data and raised `KeyError: 'stations'`. A 403 arrived looking like a missing dictionary key.
+The library I use for water levels hit the same block, but read the error page as data and raised `KeyError: 'stations'`, so the 403 showed up as a missing dictionary key.
 
 The fix was a one-line User-Agent. I also added a short pause between stations, three retries with backoff, and a stop after 8 consecutive failures, so a dead endpoint fails in seconds rather than grinding through all 137 stations.
 
-Through all of it the published data never moved. The job refuses to publish when too few stations refresh, so both failed runs left yesterday's numbers live instead of overwriting 137 stations with nothing. That check was the one piece of the pipeline I'd recommend to anyone building something similar.
+The published data never moved through any of this. The job refuses to publish when too few stations refresh, so both failed runs left yesterday's numbers live instead of overwriting 137 stations with nothing. That check was the one piece of the pipeline I'd recommend to anyone building something similar.
 
 ## What I'd Keep
 
-The dataset was worth making. Duration across thousands of station-years wasn't available anywhere in a form you could query, and now it is. None of the science is new — the metric is standard, the pattern is published — but nobody had put the numbers somewhere you could download them.
+The dataset was worth making. None of the science is new — the metric is standard and the geographic pattern is already published. What was missing was the numbers themselves, for every station and every year, in one file anyone can download.
 
 Two pieces of the build I'd use again. The basemap read by byte range, because it removed a paid service and a runtime dependency for the cost of one file in S3. And the check that stops the daily job publishing when too few stations come back, which is what kept the site correct while NOAA was blocking me.
 
