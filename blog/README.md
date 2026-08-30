@@ -1,6 +1,10 @@
 # Blog
 
-Draft and assets for the dev.to post.
+Source and assets for the dev.to post:
+https://dev.to/aws-builders/noaa-counts-flood-days-i-counted-the-hours-5017
+
+The markdown here stays the source of truth. dev.to holds its own copy with the
+images swapped for uploaded URLs, so edits made there do not come back.
 
 ```
 noaa-counts-days-i-counted-hours.md   the post
