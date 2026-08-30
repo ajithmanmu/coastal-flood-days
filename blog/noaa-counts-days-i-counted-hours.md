@@ -4,6 +4,10 @@ published: false
 tags: aws, python, data, serverless
 ---
 
+**What this is:** a dataset and a site measuring how long US coastal floods last, not just how often they happen. 137 NOAA tide gauges, every year since 1920, computed from 59.5 million raw hourly readings. Live at [floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com).
+
+---
+
 Boston and Galveston flood about the same number of days a year. Thirteen and sixteen.
 
 Their flood days are nothing alike. A flood in Boston lasts about ninety minutes. A flood in Galveston lasts about seven and a half hours.
@@ -14,7 +18,7 @@ A flood day is a binary: did the water cross the local threshold at any point? W
 
 The hours behind those counts aren't published anywhere. NOAA has a [tool](https://tidesandcurrents.noaa.gov/inundationanalysis/) that works them out for one station over a limited date range, but nobody had run it across every gauge and put the answers in a single file.
 
-So I computed it. 137 gauges, 7,743 station-years, 59.5 million hourly readings, 1920 to today. It's live at [floodhours.ajithmanmadhan.com](https://floodhours.ajithmanmadhan.com), and the Parquet file carries every station-year: flood days, flood hours, and how long a typical flood lasted at that station.
+So I computed it, from the raw readings rather than from anyone's published counts. The result is one row per station per year — 7,743 of them — carrying flood days, flood hours, and how long a typical flood lasted there.
 
 **Stack:** Python (pandas, requests), AWS Fargate for the one-time backfill, Lambda + EventBridge for the daily refresh, S3, CloudFront, Terraform, MapLibre GL, PMTiles.
 
